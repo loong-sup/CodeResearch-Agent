@@ -8,6 +8,8 @@ from service.core.retrieval import (
     retrieve_supporting_file_docs,
 )
 
+DOC_SUFFIXES = (".md", ".markdown", ".rst", ".txt")
+
 
 @dataclass
 class ToolResult:
@@ -64,12 +66,25 @@ def _enrich_references(references: list[dict], repository_by_id: Optional[dict[s
     return enriched
 
 
+def _is_doc_reference(item: dict):
+    file_path = (item.get("file_path") or "").lower()
+    return file_path.endswith(DOC_SUFFIXES) or any(
+        token in file_path for token in ("readme", "architecture", "design", "spec", "guide", "manual")
+    )
+
+
+def _prefer_code_references(references: list[dict], limit: int):
+    code_refs = [item for item in references if isinstance(item, dict) and not _is_doc_reference(item)]
+    return (code_refs or references)[:limit]
+
+
 class CodeIndexSearchTool(AgentTool):
     name = "代码索引检索"
     description = "从代码和配置 chunk 索引中检索实现、调用、配置、符号相关证据。"
 
     def run(self, *, query, user_id, repository_ids=None, repository_by_id=None, limit=4, **kwargs):
-        result = retrieve_content(user_id, query, repository_ids=repository_ids, page_size=limit)
+        result = retrieve_content(user_id, query, repository_ids=repository_ids, page_size=limit * 2)
+        result = _prefer_code_references(result, limit)
         return ToolResult(
             tool_name=self.name,
             success=True,

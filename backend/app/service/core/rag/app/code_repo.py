@@ -40,6 +40,8 @@ CONFIG_EXTENSIONS = {".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf",
 SUPPORTED_EXTENSIONS = CODE_EXTENSIONS | DOC_EXTENSIONS | CONFIG_EXTENSIONS
 IGNORED_DIRECTORIES = {
     ".git",
+    ".github",
+    ".claude",
     ".hg",
     ".svn",
     ".idea",

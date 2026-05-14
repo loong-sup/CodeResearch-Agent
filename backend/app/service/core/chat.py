@@ -7,6 +7,7 @@ from utils.database import get_db
 from fastapi import HTTPException
 from utils import logger
 from service.web_search.web_search import serper_images, serper_videos
+from database.knowledgebase_operations import get_session_memory
 
 
 def build_citations_payload(retrieved_content):
@@ -30,6 +31,162 @@ def build_citations_payload(retrieved_content):
             "preview": ref.get("content_with_weight", "")[:240],
         })
     return citations
+
+
+def _sse_message(payload):
+    return f"event: message\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def build_memory_answer(question: str, memory: list[dict]):
+    if not memory:
+        return "当前会话还没有可用的历史记录。"
+
+    normalized = (question or "").strip()
+    user_questions = [item.get("user_question", "") for item in memory if item.get("user_question")]
+
+    if any(token in normalized for token in ("最开始", "一开始", "开始", "第一个", "第一条")):
+        return f"你在当前会话最开始问的是：{user_questions[0]}"
+
+    if any(token in normalized for token in ("上一个", "上一条", "刚才", "最近", "前一个")):
+        return f"你上一个问题是：{user_questions[-1]}"
+
+    if any(token in normalized for token in ("总结", "概括", "回顾", "聊了什么", "问过什么", "哪些问题")):
+        lines = ["当前会话里你问过这些问题："]
+        for index, user_question in enumerate(user_questions, start=1):
+            lines.append(f"{index}. {user_question}")
+        return "\n".join(lines)
+
+    return f"我记得当前会话最近的问题是：{user_questions[-1]}"
+
+
+def stream_memory_answer(
+    session_id: str,
+    question: str,
+    user_id: str,
+    persist_history: bool = True,
+):
+    try:
+        memory = get_session_memory(session_id, limit=20)
+        answer = build_memory_answer(question, memory)
+    except Exception as e:
+        logger.warning(f"failed to read session memory: {e}")
+        answer = "读取当前会话历史时失败了，请稍后再试。"
+
+    yield _sse_message({
+        "role": "assistant",
+        "content": answer,
+        "thinking": False,
+        "answer_scope": "memory",
+    })
+    yield "event: end\ndata: [DONE]\n\n"
+
+    if persist_history:
+        try:
+            write_chat_to_db(session_id, question, answer, [], [], "")
+            update_session_name(session_id, question, user_id)
+        except Exception as e:
+            logger.warning(f"failed to persist memory answer: {e}")
+
+
+def stream_plain_answer(
+    session_id: str,
+    question: str,
+    answer: str,
+    user_id: str,
+    persist_history: bool = True,
+):
+    message = {
+        "role": "assistant",
+        "content": answer,
+        "thinking": False,
+        "answer_scope": "chitchat",
+    }
+    yield _sse_message(message)
+    yield "event: end\ndata: [DONE]\n\n"
+    if persist_history:
+        try:
+            write_chat_to_db(session_id, question, answer, [], [], "")
+            update_session_name(session_id, question, user_id)
+        except Exception as e:
+            logger.warning(f"failed to persist plain answer: {e}")
+
+
+def get_general_chat_completion(
+    session_id,
+    question,
+    user_id,
+    final_prompt,
+    snippets=None,
+    persist_history=True,
+):
+    model_answer = ""
+    think = ""
+    try:
+        if snippets:
+            yield _sse_message({"web_search": snippets, "answer_scope": "general"})
+
+        client = OpenAI(
+            api_key=os.getenv("DASHSCOPE_API_KEY"),
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            timeout=60,
+        )
+        completion = client.chat.completions.create(
+            model="qwen2.5-72b-instruct",
+            messages=[{"role": "user", "content": final_prompt}],
+            stream=True,
+        )
+
+        for chunk in completion:
+            if chunk.choices[0].finish_reason == "stop":
+                if persist_history:
+                    try:
+                        write_chat_to_db(session_id, question, model_answer, [], [], think)
+                        update_session_name(session_id, question, user_id)
+                    except Exception as e:
+                        logger.warning(f"failed to persist general answer: {e}")
+                yield "event: end\ndata: [DONE]\n\n"
+                break
+
+            delta = chunk.choices[0].delta
+            content = getattr(delta, "content", None)
+            reasoning_content = getattr(delta, "reasoning_content", None)
+            if content:
+                model_answer += content
+                yield _sse_message({
+                    "role": "assistant",
+                    "content": content,
+                    "thinking": False,
+                    "answer_scope": "general",
+                })
+            elif reasoning_content:
+                think += reasoning_content
+                yield _sse_message({
+                    "role": "assistant",
+                    "content": reasoning_content,
+                    "thinking": True,
+                    "answer_scope": "general",
+                })
+    except Exception as e:
+        logger.warning(f"general answer generation failed: {e}")
+        fallback = (
+            "这个问题不属于当前代码库的实现、调用链或配置范围。"
+            "当前通用回答生成暂时不可用；如果你希望我基于代码库分析，请补充具体文件、接口、函数、报错或模块名称。"
+        )
+        if not model_answer:
+            yield _sse_message({
+                "role": "assistant",
+                "content": fallback,
+                "thinking": False,
+                "answer_scope": "fallback",
+            })
+            model_answer = fallback
+            if persist_history:
+                try:
+                    write_chat_to_db(session_id, question, model_answer, [], [], think)
+                    update_session_name(session_id, question, user_id)
+                except Exception as persist_error:
+                    logger.warning(f"failed to persist fallback answer: {persist_error}")
+        yield "event: end\ndata: [DONE]\n\n"
 
 
 def generate_recommended_questions(user_question, retrieved_content):
@@ -81,17 +238,21 @@ def generate_recommended_questions(user_question, retrieved_content):
     请严格按照上述格式返回 JSON 对象。
     """
     
-    # 调用大模型生成推荐问题
-    client = OpenAI(
-            api_key=os.getenv("DASHSCOPE_API_KEY"),
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+    try:
+        client = OpenAI(
+                api_key=os.getenv("DASHSCOPE_API_KEY"),
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                timeout=30,
+            )
+        completion = client.chat.completions.create(
+            model="qwen2.5-72b-instruct",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            stream=False,
         )
-    completion = client.chat.completions.create(
-        model="qwen2.5-72b-instruct",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
-        stream=False,
-    )
+    except Exception as e:
+        logger.warning(f"recommended question generation failed: {e}")
+        return []
 
     # 提取生成的推荐问题
     if completion.choices:
@@ -266,20 +427,6 @@ def get_chat_completion(
 
     try:
         # 初始化 OpenAI 客户端
-        client = OpenAI(
-            api_key=os.getenv("DASHSCOPE_API_KEY"),
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
-        )
-
-        # 创建聊天完成请求
-        completion = client.chat.completions.create(
-            model="deepseek-r1",  # 可按需更换模型名称
-            messages=[
-                {"role": "user", "content": final_prompt}
-            ],
-            stream=True,
-        )
-
         # 返回知识库检索内容
         message = {
             "documents": retrieved_content,
@@ -317,6 +464,22 @@ def get_chat_completion(
             json_message = json.dumps(message)
             yield f"event: message\ndata: {json_message}\n\n"
 
+        # 初始化 OpenAI 客户端。放在首批 SSE 事件之后，避免模型连接慢时前端完全无响应。
+        client = OpenAI(
+            api_key=os.getenv("DASHSCOPE_API_KEY"),
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            timeout=60,
+        )
+
+        # 创建聊天完成请求
+        completion = client.chat.completions.create(
+            model="deepseek-r1",  # 可按需更换模型名称
+            messages=[
+                {"role": "user", "content": final_prompt}
+            ],
+            stream=True,
+        )
+
         # 处理流式响应
         model_answer = ""  # 用于存储大模型的回答
         think = "" # 用于存储思考过程
@@ -349,10 +512,11 @@ def get_chat_completion(
                 # 将对话数据写入数据库
                 print("最终回答：\n")
                 print(model_answer)
-                write_chat_to_db(session_id, question, model_answer, retrieved_content, related_questions, think)
-
-                # 生成会话名称
-                update_session_name(session_id, question, user_id)
+                try:
+                    write_chat_to_db(session_id, question, model_answer, retrieved_content, related_questions, think)
+                    update_session_name(session_id, question, user_id)
+                except Exception as persist_error:
+                    logger.warning(f"failed to persist codebase answer: {persist_error}")
                 break
             else:
                 # 实时输出消息
@@ -367,10 +531,13 @@ def get_chat_completion(
                     json_message = json.dumps(message)
                     yield f"event: message\ndata: {json_message}\n\n"
                 else :
-                    think += delta.reasoning_content
+                    reasoning_content = getattr(delta, "reasoning_content", "") or ""
+                    if not reasoning_content:
+                        continue
+                    think += reasoning_content
                     message = {
                         "role": "assistant",
-                        "content": delta.reasoning_content,
+                        "content": reasoning_content,
                         "thinking": True,
                     }
                     json_message = json.dumps(message)
@@ -384,4 +551,4 @@ def get_chat_completion(
         }
         json_error_message = json.dumps(error_message)
         yield f"event: error\ndata: {json_error_message}\n\n"
-
+        yield "event: end\ndata: [DONE]\n\n"

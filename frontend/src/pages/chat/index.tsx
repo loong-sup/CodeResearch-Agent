@@ -69,9 +69,14 @@ export default function Index() {
   // 加载聊天历史记录
   const history = useRequest(
     async () => {
-      const { data } = await api.session.detail({
-        session_id: id!,
-      })
+      const { data } = await api.session.detail(
+        {
+          session_id: id!,
+        },
+        {
+          loading: false,
+        },
+      )
       return data
     },
     {
@@ -163,7 +168,9 @@ export default function Index() {
 
   const repositories = useRequest(
     async () => {
-      const { data } = await api.repository.list()
+      const { data } = await api.repository.list(undefined, {
+        loading: false,
+      })
       return data || []
     },
     {
@@ -222,12 +229,17 @@ export default function Index() {
         })
 
         // 获取流式响应的reader
-        const reader = res.data.getReader()
-        if (!reader) return
+        const reader = res.data?.getReader()
+        if (!reader) {
+          target.error = '后端没有返回可读取的流式响应。'
+          return
+        }
 
         await read(reader)
       } catch (error: unknown) {
-        target.error = (error as Error)?.message ?? 'Unknown error'
+        target.error =
+          (error as Error)?.message ||
+          '请求后端失败，请确认后端服务已启动并且前端代理地址正确。'
         throw error
       } finally {
         target.loading = false
@@ -241,7 +253,9 @@ export default function Index() {
         const decoder = new TextDecoder('utf-8')
         while (true) {
           const { value, done } = await reader.read()
-          temp += decoder.decode(value)
+          if (value) {
+            temp += decoder.decode(value, { stream: !done })
+          }
 
           // 按行解析SSE数据
           while (true) {
@@ -258,6 +272,7 @@ export default function Index() {
           }
 
           if (done) {
+            temp += decoder.decode()
             console.debug('数据接受完毕', temp)
             target.loading = false
             break
@@ -273,10 +288,17 @@ export default function Index() {
             .replace(/^data: /, '')
             .trim()
           if (str === '[DONE]') {
+            target.loading = false
             return
           }
 
           const json = JSON.parse(str)
+          if (json?.role === 'error') {
+            target.error = json.content || '后端响应失败'
+            target.loading = false
+            return
+          }
+
           // 处理内容更新，区分思考内容和回答内容
           if (json?.content) {
             if (json.thinking) {
@@ -336,10 +358,15 @@ export default function Index() {
         }
         if (!message.trim() || !repositoryOptions.length) return undefined
         try {
-          const { data } = await api.session.getRepositoryCandidates({
-            question: message,
-            session_id: id,
-          })
+          const { data } = await api.session.getRepositoryCandidates(
+            {
+              question: message,
+              session_id: id,
+            },
+            {
+              loading: false,
+            },
+          )
           const candidate = (data || []).find((item) =>
             repositoryOptions.some((option) => option.value === item.repository_id),
           )

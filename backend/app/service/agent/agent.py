@@ -7,12 +7,14 @@ from openai import OpenAI
 from database.agent_operations import create_agent_run, finish_agent_run, save_agent_step
 from database.knowledgebase_operations import get_session_memory
 from service.agent.tools import tool_registry
-from service.core.chat import update_session_name, write_chat_to_db
+from service.core.chat import build_memory_answer, update_session_name, write_chat_to_db
 from service.core.retrieval import (
     retrieve_content,
     retrieve_exact_filename_content,
     retrieve_supporting_file_docs,
 )
+from service.repository_overview import build_repository_overview_evidence, is_repository_overview_query
+from utils.query_intent import QueryIntent, chitchat_answer, classify_query_intent
 
 
 MIN_PROMPT_LENGTH = 2
@@ -22,6 +24,25 @@ PER_PROMPT_RESULT_LIMIT = 4
 FINAL_EVIDENCE_LIMIT = 8
 FILE_ROLE_HINT_KEYWORDS = ("作用", "做什么", "入口", "启动", "用途", "职责")
 SUPPORTING_DOC_HINT_TOKENS = ("readme", "architecture", "design", "spec", "guide", "reference", "manual")
+DOC_FILE_SUFFIXES = (".md", ".markdown", ".rst", ".txt")
+CODE_FILE_SUFFIXES = (
+    ".py",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".java",
+    ".go",
+    ".rs",
+    ".c",
+    ".cc",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".php",
+    ".sh",
+    ".sql",
+)
 
 
 def extract_json_content(input_str: str | None):
@@ -36,6 +57,7 @@ def middle_json_model(prompt: str):
     client = OpenAI(
         api_key=os.getenv("DASHSCOPE_API_KEY"),
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        timeout=30,
     )
     completion = client.chat.completions.create(
         model="qwen-max",
@@ -165,6 +187,65 @@ def extract_target_filename(query: str):
     return filenames[0] if filenames else None
 
 
+def is_doc_reference(item: dict):
+    file_path = (item.get("file_path") or "").lower()
+    return file_path.endswith(DOC_FILE_SUFFIXES) or any(
+        token in file_path for token in SUPPORTING_DOC_HINT_TOKENS
+    )
+
+
+def is_code_reference(item: dict):
+    file_path = (item.get("file_path") or "").lower()
+    language = (item.get("language") or "").lower()
+    return file_path.endswith(CODE_FILE_SUFFIXES) or language in {
+        "python",
+        "javascript",
+        "typescript",
+        "java",
+        "go",
+        "rust",
+        "c",
+        "cpp",
+        "php",
+        "shell",
+        "sql",
+    }
+
+
+def parse_metadata_json(value):
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def resolve_candidate_file_paths(filename: str, repository_by_id: dict[str, dict] | None):
+    if not filename or not repository_by_id:
+        return []
+    normalized = filename.strip().strip("`'\"").replace("\\", "/").lower()
+    candidates = []
+    seen = set()
+    for repo in repository_by_id.values():
+        metadata = parse_metadata_json(repo.get("metadata_json"))
+        files = (metadata.get("structure_index") or {}).get("files", [])
+        for file_item in files:
+            file_path = str(file_item.get("file_path") or "").replace("\\", "/")
+            if not file_path:
+                continue
+            lowered = file_path.lower()
+            if lowered == normalized or lowered.endswith(f"/{normalized}") or lowered.split("/")[-1] == normalized:
+                if file_path in seen:
+                    continue
+                seen.add(file_path)
+                candidates.append(file_path)
+    candidates.sort(key=lambda path: (path.count("/"), path))
+    return candidates
+
+
 def is_file_role_question(user_query: str):
     return any(keyword in (user_query or "") for keyword in FILE_ROLE_HINT_KEYWORDS)
 
@@ -186,28 +267,35 @@ def maybe_add_file_role_prompts(user_query: str, prompts: list[str]):
     return prompts
 
 
-def is_supporting_document(item: dict):
-    file_path = (item.get("file_path") or "").lower()
-    return file_path.endswith((".md", ".markdown", ".rst", ".txt")) or any(
-        token in file_path for token in SUPPORTING_DOC_HINT_TOKENS
-    )
-
-
 def build_exact_file_memory(user_query, user_id, repository_ids, repository_by_id):
     memory = []
     for filename in extract_target_filenames(user_query)[:2]:
-        exact_results = retrieve_exact_filename_content(
-            user_id=user_id,
-            filename=filename,
-            repository_ids=repository_ids,
-            page_size=PER_PROMPT_RESULT_LIMIT * 2,
-        )
+        candidate_paths = resolve_candidate_file_paths(filename, repository_by_id)
+        search_paths = candidate_paths or [filename]
+        exact_results = []
+        seen_chunks = set()
+        for path in search_paths[:4]:
+            path_results = retrieve_exact_filename_content(
+                user_id=user_id,
+                filename=path,
+                repository_ids=repository_ids,
+                page_size=PER_PROMPT_RESULT_LIMIT * 2,
+            )
+            for result in path_results:
+                key = result.get("chunk_id") or result.get("citation")
+                if key in seen_chunks:
+                    continue
+                seen_chunks.add(key)
+                exact_results.append(result)
         exact_results = enrich_references(exact_results, repository_by_id=repository_by_id)
+        code_results = [item for item in exact_results if is_code_reference(item)]
+        if code_results:
+            exact_results = code_results
         exact_results = select_relevant_results(exact_results, limit=PER_PROMPT_RESULT_LIMIT)
         if exact_results:
             memory.append(
                 {
-                    "提问": f"{filename} 精确文件召回",
+                    "提问": f"{filename} 精确文件召回：{', '.join(search_paths[:4])}",
                     "结果": exact_results,
                     "action_name": "精确文件召回",
                     "source_stage": "exact_file",
@@ -223,7 +311,7 @@ def build_exact_file_memory(user_query, user_id, repository_ids, repository_by_i
                 page_size=PER_PROMPT_RESULT_LIMIT * 2,
             )
             supporting_docs = enrich_references(supporting_docs, repository_by_id=repository_by_id)
-            supporting_docs = [item for item in supporting_docs if is_supporting_document(item)]
+            supporting_docs = [item for item in supporting_docs if is_doc_reference(item)]
             supporting_docs = select_relevant_results(supporting_docs, limit=PER_PROMPT_RESULT_LIMIT)
             if supporting_docs:
                 memory.append(
@@ -326,9 +414,11 @@ def select_relevant_results(result, limit=PER_PROMPT_RESULT_LIMIT):
         if not isinstance(item, dict):
             return -1
         return (
+            4 if is_code_reference(item) else 0,
             3 if item.get("citation") else 0,
             2 if item.get("file_path") else 0,
             1 if item.get("symbol") else 0,
+            -1 if is_doc_reference(item) else 0,
             len(item.get("content_with_weight", "")),
         )
 
@@ -379,6 +469,8 @@ def build_memory_citations(memory):
             continue
         for item in result:
             if not isinstance(item, dict):
+                continue
+            if item.get("type") == "repository_overview":
                 continue
             citation = item.get("citation")
             if not citation or citation in seen:
@@ -563,7 +655,16 @@ def build_final_prompt(user_query, repository_context, final_evidence, session_m
 3. 重要结论必须使用内联引用，格式为 [文件路径:起始行-结束行]。
 4. 如果存在同名文件或多仓库上下文，先说明当前结论对应的仓库/路径。
 5. 如果证据不足，明确说明缺少哪些信息。
-6. 语言保持工程分析风格，不要使用销售或营销语言。
+6. 如果证据里包含 .py/.js/.ts 等代码文件，优先解释代码实现，不要用 README 或项目文档替代代码证据。
+7. 对“某个文件实现了哪些功能/怎么运行/调用链是什么”这类问题，按这个结构回答：
+   - 文件定位：说明文件路径、它在项目中的角色。
+   - 入口与主流程：按执行顺序解释 import、初始化、主要函数/类、条件分支、外部调用。
+   - 关键函数/类：列出名称、职责、输入输出或副作用。
+   - 数据流/控制流：说明数据从哪里来、经过哪些处理、最后到哪里。
+   - 可继续追问：给出 2-3 个基于真实代码符号的追问方向。
+8. 可以引用很短的代码标识符或函数名，但不要大段复述代码。
+9. 语言保持工程分析风格，不要使用销售或营销语言。
+10. 如果证据包含 type=repository_overview，把它当作仓库地图来总结：先说整体组成，再说主要目录/语言/代表文件/可继续追问的问题。仓库地图本身不需要行号引用；涉及具体实现细节时才使用文件行号引用。
 
 当前代码库上下文：
 {repo_context_text}
@@ -601,10 +702,77 @@ def final_answer(
     final_evidence = []
     model_answer = ""
     think = ""
+    def log_stage(stage: str):
+        print(f"[deep_research] {stage}: {user_query}")
+
     try:
+        log_stage("start")
+        query_intent = classify_query_intent(user_query)
+        if query_intent == QueryIntent.CHITCHAT:
+            log_stage("chitchat")
+            model_answer = chitchat_answer(user_query)
+            message = {
+                "role": "assistant",
+                "content": model_answer,
+                "thinking": False,
+                "answer_scope": "chitchat",
+            }
+            yield f"event: message\ndata: {json.dumps(message, ensure_ascii=False)}\n\n"
+            yield "event: end\ndata: [DONE]\n\n"
+            if persist_history and session_id:
+                try:
+                    write_chat_to_db(session_id, user_query, model_answer, [], [], "")
+                    update_session_name(session_id, user_query, user_id)
+                except Exception as persist_error:
+                    print(f"failed to persist chitchat answer: {persist_error}")
+            return
+
+        if query_intent == QueryIntent.MEMORY:
+            log_stage("memory")
+            session_memory = get_session_memory(session_id, limit=20) if session_id else []
+            model_answer = build_memory_answer(user_query, session_memory)
+            message = {
+                "role": "assistant",
+                "content": model_answer,
+                "thinking": False,
+                "answer_scope": "memory",
+            }
+            yield f"event: message\ndata: {json.dumps(message, ensure_ascii=False)}\n\n"
+            yield "event: end\ndata: [DONE]\n\n"
+            if persist_history and session_id:
+                try:
+                    write_chat_to_db(session_id, user_query, model_answer, [], [], "")
+                    update_session_name(session_id, user_query, user_id)
+                except Exception as persist_error:
+                    print(f"failed to persist memory answer: {persist_error}")
+            return
+
+        if query_intent == QueryIntent.GENERAL:
+            log_stage("general")
+            model_answer = (
+                "这个问题看起来不属于当前代码库的实现、调用链或配置范围。"
+                "我可以回答通用问题；如果你希望我基于当前仓库分析，请补充具体文件、接口、函数、报错或模块名称。"
+            )
+            message = {
+                "role": "assistant",
+                "content": model_answer,
+                "thinking": False,
+                "answer_scope": "general",
+            }
+            yield f"event: message\ndata: {json.dumps(message, ensure_ascii=False)}\n\n"
+            yield "event: end\ndata: [DONE]\n\n"
+            if persist_history and session_id:
+                try:
+                    write_chat_to_db(session_id, user_query, model_answer, [], [], "")
+                    update_session_name(session_id, user_query, user_id)
+                except Exception as persist_error:
+                    print(f"failed to persist general answer: {persist_error}")
+            return
+
         client = OpenAI(
             api_key=os.getenv("DASHSCOPE_API_KEY"),
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            timeout=60,
         )
         repository_context = repository_context or []
         repository_by_id = {
@@ -615,6 +783,26 @@ def final_answer(
         formatted_repository_context = format_repository_context(repository_context)
         session_memory = get_session_memory(session_id) if session_id else []
         memory_global = []
+
+        if is_repository_overview_query(user_query):
+            overview_evidence = build_repository_overview_evidence(repository_context)
+            if overview_evidence:
+                memory_global.append(
+                    {
+                        "提问": "仓库结构概览",
+                        "结果": overview_evidence,
+                        "action_name": "代码结构检索",
+                        "source_stage": "overview",
+                    }
+                )
+                if run_id:
+                    save_agent_step(
+                        run_id=run_id,
+                        step_type="tool_call",
+                        tool_name="仓库结构概览",
+                        input_payload={"query": user_query},
+                        output_payload=overview_evidence,
+                    )
 
         if session_id:
             run_id = create_agent_run(
@@ -651,7 +839,9 @@ def final_answer(
                 yield update
             memory_global.extend(exact_file_memory)
 
+        log_stage("plan_start")
         action_tool = agent_plan(user_query)
+        log_stage("plan_done")
         print("action_tool")
         print(action_tool)
 
@@ -684,6 +874,7 @@ def final_answer(
         for update in send_agent_updates(actions):
             yield update
 
+        log_stage("retrieval_start")
         memory_global.extend(process_actions(
             actions,
             user_id=user_id,
@@ -694,9 +885,12 @@ def final_answer(
             allow_web_search=allow_web_search,
             stage="plan",
         ))
+        log_stage("retrieval_done")
 
         if should_run_reflection(user_query, memory_global):
+            log_stage("reflection_start")
             action_reflect = reflection(user_query, build_final_evidence(memory_global, limit=4))
+            log_stage("reflection_done")
             if run_id:
                 save_agent_step(
                     run_id=run_id,
@@ -753,15 +947,18 @@ def final_answer(
         print(final_prompt)
         print("-" * 130)
 
+        log_stage("final_model_start")
         completion = client.chat.completions.create(
-            model="deepseek-r1",
+            model="deepseek-v4-flash",
             messages=[{"role": "user", "content": final_prompt}],
             stream=True,
         )
 
         print("\n" + "=" * 20 + "思考过程" + "=" * 20 + "\n")
+        completed = False
         for chunk in completion:
             if chunk.choices[0].finish_reason == "stop":
+                completed = True
                 if run_id:
                     save_agent_step(
                         run_id=run_id,
@@ -775,10 +972,13 @@ def final_answer(
                         final_answer=model_answer,
                         final_evidence=final_evidence,
                     )
-                if persist_history and session_id:
-                    write_chat_to_db(session_id, user_query, model_answer, final_evidence, [], think)
-                    update_session_name(session_id, user_query, user_id)
                 yield "event: end\ndata: [DONE]\n\n"
+                if persist_history and session_id:
+                    try:
+                        write_chat_to_db(session_id, user_query, model_answer, final_evidence, [], think)
+                        update_session_name(session_id, user_query, user_id)
+                    except Exception as persist_error:
+                        print(f"failed to persist deep research answer: {persist_error}")
                 break
 
             delta = chunk.choices[0].delta
@@ -801,6 +1001,8 @@ def final_answer(
             else:
                 continue
             yield f"event: message\ndata: {json.dumps(message, ensure_ascii=False)}\n\n"
+        if not completed:
+            yield "event: end\ndata: [DONE]\n\n"
     except Exception as e:
         if run_id:
             finish_agent_run(
@@ -812,3 +1014,4 @@ def final_answer(
             )
         error_message = {"role": "error", "content": str(e)}
         yield f"event: error\ndata: {json.dumps(error_message, ensure_ascii=False)}\n\n"
+        yield "event: end\ndata: [DONE]\n\n"

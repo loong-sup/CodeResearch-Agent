@@ -11,15 +11,23 @@ from typing import List
 from service.core.api.utils.file_utils import get_project_base_directory
 from database.knowledgebase_operations import bind_session_repository, get_user_history_questions
 from service.core.retrieval import retrieve_content
-from service.core.chat import get_chat_completion, generate_recommended_questions
+from service.core.chat import (
+    get_chat_completion,
+    generate_recommended_questions,
+    get_general_chat_completion,
+    stream_memory_answer,
+    stream_plain_answer,
+)
 from utils import logger
 from typing import List, Optional
 from database.knowledgebase_operations import verify_user_knowledgebase
 from service.agent.agent import final_answer
 from sqlalchemy.orm import Session
 from service.repository_service import create_repository_from_source, resolve_repository_context
+from service.repository_overview import build_repository_overview_evidence, is_repository_overview_query
 from utils.database import get_db
-from utils.prompt import CodebaseAnswerPrompt
+from utils.prompt import CodebaseAnswerPrompt, GeneralAnswerPrompt
+from utils.query_intent import QueryIntent, chitchat_answer, classify_query_intent
 import json
 
 # 加载 .env 文件
@@ -229,9 +237,58 @@ async def ai_search(
         user_id = '1'
         
         question = request.message
+        query_intent = classify_query_intent(question)
         explicit_repository_ids = request.repository_ids or (
             [request.repository_id] if request.repository_id else None
         )
+
+        if query_intent == QueryIntent.CHITCHAT:
+            return StreamingResponse(
+                stream_plain_answer(
+                    session_id=session_id,
+                    question=question,
+                    answer=chitchat_answer(question),
+                    user_id=user_id,
+                ),
+                media_type="text/event-stream",
+            )
+
+        if query_intent == QueryIntent.MEMORY:
+            return StreamingResponse(
+                stream_memory_answer(
+                    session_id=session_id,
+                    question=question,
+                    user_id=user_id,
+                ),
+                media_type="text/event-stream",
+            )
+
+        if query_intent == QueryIntent.GENERAL:
+            snippets = []
+            if request.web_search:
+                try:
+                    from service.web_search.web_search import process_search_results, serper_search
+
+                    search_results = serper_search(question)
+                    snippets, _ = process_search_results(search_results)
+                except Exception as e:
+                    logger.warning(f"web search failed: {e}")
+            history_questions = get_user_history_questions(session_id)
+            final_prompt = GeneralAnswerPrompt % (
+                json.dumps(snippets, ensure_ascii=False, indent=2),
+                history_questions,
+                question,
+            )
+            return StreamingResponse(
+                get_general_chat_completion(
+                    session_id=session_id,
+                    question=question,
+                    user_id=user_id,
+                    final_prompt=final_prompt,
+                    snippets=snippets,
+                ),
+                media_type="text/event-stream",
+            )
 
         
         # 验证用户是否有自己的知识库
@@ -255,7 +312,12 @@ async def ai_search(
             if session_id and repository_ids:
                 bind_session_repository(user_id, session_id, repository_ids[0], db=db)
                 db.commit()
-            references = retrieve_content(user_id, question, repository_ids=repository_ids)
+            overview_evidence = (
+                build_repository_overview_evidence(resolved_repositories)
+                if is_repository_overview_query(question)
+                else []
+            )
+            references = overview_evidence + retrieve_content(user_id, question, repository_ids=repository_ids)
             repository_by_id = {repo["id"]: repo for repo in resolved_repositories}
             for reference in references:
                 repo = repository_by_id.get(reference.get("repository_id"))
@@ -286,7 +348,11 @@ async def ai_search(
             except Exception as e:
                 logger.warning(f"web search failed: {e}")
 
-        related_questions = generate_recommended_questions(question, references)
+        try:
+            related_questions = generate_recommended_questions(question, references)
+        except Exception as e:
+            logger.warning(f"recommended question generation failed: {e}")
+            related_questions = []
         final_reference_payload = {
             "repository_snippets": references,
             "web_search": snippets,
@@ -336,6 +402,31 @@ async def deep_research(
     try:
         user_id = "1"
         question = request.message
+        query_intent = classify_query_intent(question)
+        if query_intent == QueryIntent.MEMORY:
+            return StreamingResponse(
+                stream_memory_answer(
+                    session_id=session_id,
+                    question=question,
+                    user_id=user_id,
+                ),
+                media_type="text/event-stream",
+            )
+
+        if query_intent in (QueryIntent.CHITCHAT, QueryIntent.GENERAL):
+            return StreamingResponse(
+                final_answer(
+                    question,
+                    user_id=user_id,
+                    repository_ids=None,
+                    repository_context=[],
+                    session_id=session_id,
+                    allow_web_search=request.web_search,
+                    persist_history=True,
+                ),
+                media_type="text/event-stream"
+            )
+
         explicit_repository_ids = request.repository_ids or (
             [request.repository_id] if request.repository_id else None
         )
