@@ -1,0 +1,92 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / frontend
+node_modules/
+dist/
+dist-ssr/
+build/
+*.local
+
+# Logs and runtime files
+logs/
+*.log
+*.pid
+*.seed
+*.pid.lock
+
+# Uploaded/indexed project data and local storage
+backend/app/service/core/storage/file/
+backend/app/storage/
+backend/storage/
+backend/uploads/
+backend/nltk_data/
+
+# Downloaded OCR/layout model artifacts
+backend/app/service/core/rag/res/deepdoc/.cache/
+backend/app/service/core/rag/res/deepdoc/*.onnx
+backend/app/service/core/rag/res/deepdoc/*.model
+
+# Generated evaluation reports
+backend/app/evals/reports/
+
+# Local model, vector, and database artifacts
+*.db
+*.sqlite
+*.sqlite3
+chroma/
+chromadb/
+.chroma/
+
+# Certificates and private keys
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+
+# Docker and local volumes
+docker-data/
+/data/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Package manager caches
+.npm/
+.pnpm-store/
+.yarn/
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions

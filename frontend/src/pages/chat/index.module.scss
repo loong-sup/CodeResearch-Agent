@@ -1,0 +1,45 @@
+.chat-page {
+  padding: 92px 40px;
+  margin: 0 auto;
+
+  .chat-page__repository-context {
+    margin-bottom: 20px;
+    color: #6f798b;
+    font-size: 14px;
+  }
+
+  .chat-page__header {
+    text-align: center;
+
+    .chat-page__header-title-box {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .chat-page__header-logo {
+      width: 58px;
+      height: 40px;
+    }
+
+    .chat-page__header-title {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-weight: bold;
+      font-size: 24px;
+    }
+
+    .chat-page__header-subtitle {
+      margin-top: 8px;
+      font-size: 60px;
+      font-weight: bold;
+    }
+
+    .chat-page__header-desc {
+      margin-top: 8px;
+      color: #6F798B;
+    }
+  }
+}

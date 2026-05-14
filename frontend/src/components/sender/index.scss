@@ -1,0 +1,126 @@
+.com-sender {
+  .com-sender__main {
+    background-color: #D2ECED;
+    border-radius: 16px;
+    border: 1px solid #e5e5e5;
+
+    .com-sender__toolbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px 16px 0;
+      flex-wrap: wrap;
+
+      .com-sender__toolbar-left {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .com-sender__repository-picker {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+
+        .com-sender__repository-icon {
+          color: #6f798b;
+        }
+
+        .ant-select {
+          min-width: 220px;
+        }
+      }
+
+      .com-sender__repository-context {
+        color: #6f798b;
+        font-size: 12px;
+        line-height: 32px;
+      }
+    }
+
+    .ant-input {
+      background: transparent;
+      border: none;
+      padding: 22px 26px;
+      box-shadow: none;
+
+      &::placeholder {
+        color: #6f798b;
+      }
+    }
+  }
+
+  .com-sender__actions {
+    display: flex;
+    justify-content: space-between;
+    padding: 14px 16px;
+    padding-top: 0;
+
+    .ant-btn {
+      --ant-button-padding-inline: 8px;
+      &.ant-btn-variant-filled {
+        border: solid 1px var(--ant-color-primary-border);
+      }
+      &.btn-send {
+        &.ant-btn-variant-filled {
+          border: solid 1px transparent;
+        }
+        svg {
+          width: 22px;
+          height: 22px;
+          -webkit-user-drag: none;
+          transform: translate(-1px, 2px);
+        }
+      }
+    }
+  }
+
+  .com-sender__footer {
+    margin-top: 20px;
+    color: #6f798b;
+
+    .ant-switch {
+      --ant-switch-track-height: 30px;
+      --ant-switch-handle-size: 26px;
+      --ant-switch-track-min-width: 56px;
+    }
+  }
+
+  .com-sender__files {
+    display: flex;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 10px;
+
+    .com-sender__file {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      background-color: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 10px;
+      max-width: 50%;
+
+      .com-sender__file-image {
+        width: 100px;
+        height: 100px;
+        border-radius: 5px;
+        object-fit: cover;
+      }
+
+      .com-sender__file-icon {
+        flex-shrink: 0;
+      }
+
+      .com-sender__file-name {
+        color: #6f798b;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+  }
+}

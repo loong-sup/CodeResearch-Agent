@@ -1,0 +1,40 @@
+.base-layout {
+  height: 100%;
+  > main {
+    height: calc(100% - 60px);
+    padding-left: 54px + 23px * 2;
+  }
+}
+
+.base-layout__header {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+}
+
+.base-layout__sidebar {
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 54px + 23px * 2;
+  display: flex;
+
+  .base-layout__sidebar-main {
+    flex-grow: 1;
+    overflow: auto;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+  }
+
+  .base-layout__sidebar-main-content {
+    max-height: 100%;
+  }
+}
+
+.base-layout__content {
+  height: 100%;
+}

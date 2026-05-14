@@ -1,0 +1,12 @@
+.header-bar {
+  background-color: #fff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+  padding: 10px 20px;
+  display: flex;
+  align-items: center; // 添加 alignItems 样式
+}
+
+.logo {
+  height: 40px;
+  margin-right: 10px;
+}

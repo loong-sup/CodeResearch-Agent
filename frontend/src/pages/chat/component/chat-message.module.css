@@ -1,0 +1,31 @@
+.chat-message {
+  display: flex;
+  flex-direction: column;
+  padding: 20px 0;
+}
+
+.user-message--wrapper {
+  gap: 10px;
+}
+
+.chat-message-item {
+  word-break: break-all;
+  word-wrap: break-word;
+}
+.chat-message-item + .chat-message-item {
+  margin-top: 30px;
+}
+
+.chat-message-item--user {
+  background-color: #c8e6e7;
+  padding: 15px 20px;
+  border-radius: 12px;
+  font-weight: bold;
+}
+
+.chat-status {
+  margin: 20px 0;
+  padding: 15px 20px;
+  border-radius: 12px;
+  background-color: #e8f0f8;
+}

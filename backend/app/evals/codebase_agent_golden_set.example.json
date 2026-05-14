@@ -1,0 +1,262 @@
+{
+  "description": "Golden test set aligned with the indexed MODULAR-RAG-MCP-SERVER repository.",
+  "version": "2.0",
+  "test_cases": [
+    {
+      "id": "mcp_001",
+      "question": "MCP 中负责知识库检索的工具叫什么？它的主要输入参数有哪些？",
+      "repository_ids": [],
+      "expected_file_paths": [
+        "src/mcp_server/tools/query_knowledge_hub.py"
+      ],
+      "expected_citations": [],
+      "must_include": [
+        "query_knowledge_hub",
+        "query",
+        "top_k",
+        "collection"
+      ],
+      "require_citations": true,
+      "tags": [
+        "mcp",
+        "tool_schema"
+      ]
+    },
+    {
+      "id": "mcp_002",
+      "question": "query_knowledge_hub 组合了哪些核心检索和重排能力？",
+      "repository_ids": [],
+      "expected_file_paths": [
+        "src/mcp_server/tools/query_knowledge_hub.py",
+        "src/core/query_engine/hybrid_search.py"
+      ],
+      "expected_citations": [],
+      "must_include": [
+        "HybridSearch",
+        "Dense",
+        "Sparse",
+        "rerank"
+      ],
+      "require_citations": true,
+      "tags": [
+        "mcp",
+        "retrieval"
+      ]
+    },
+    {
+      "id": "core_001",
+      "question": "HybridSearch 主要串联了哪些组件？",
+      "repository_ids": [],
+      "expected_file_paths": [
+        "src/core/query_engine/hybrid_search.py"
+      ],
+      "expected_citations": [],
+      "must_include": [
+        "QueryProcessor",
+        "DenseRetriever",
+        "SparseRetriever",
+        "RRF"
+      ],
+      "require_citations": true,
+      "tags": [
+        "retrieval",
+        "architecture"
+      ]
+    },
+    {
+      "id": "core_002",
+      "question": "HybridSearch 在设计上如何处理某一条检索路径失败的情况？",
+      "repository_ids": [],
+      "expected_file_paths": [
+        "src/core/query_engine/hybrid_search.py"
+      ],
+      "expected_citations": [],
+      "must_include": [
+        "Graceful Degradation",
+        "fallback"
+      ],
+      "require_citations": true,
+      "tags": [
+        "retrieval",
+        "resilience"
+      ]
+    },
+    {
+      "id": "core_003",
+      "question": "QueryProcessor 支持什么过滤语法？能解析哪些常见过滤键？",
+      "repository_ids": [],
+      "expected_file_paths": [
+        "src/core/query_engine/query_processor.py"
+      ],
+      "expected_citations": [],
+      "must_include": [
+        "key:value",
+        "collection",
+        "doc_type",
+        "source_path"
+      ],
+      "require_citations": true,
+      "tags": [
+        "query_processing",
+        "filters"
+      ]
+    },
+    {
+      "id": "core_004",
+      "question": "CitationGenerator 会从 RetrievalResult 里提取哪些核心引用字段？",
+      "repository_ids": [],
+      "expected_file_paths": [
+        "src/core/response/citation_generator.py"
+      ],
+      "expected_citations": [],
+      "must_include": [
+        "chunk_id",
+        "source",
+        "text_snippet",
+        "page"
+      ],
+      "require_citations": true,
+      "tags": [
+        "response",
+        "citation"
+      ]
+    },
+    {
+      "id": "resp_001",
+      "question": "ResponseBuilder 在没有检索结果时会返回什么结构和状态标记？",
+      "repository_ids": [],
+      "expected_file_paths": [
+        "src/core/response/response_builder.py"
+      ],
+      "expected_citations": [],
+      "must_include": [
+        "MCPToolResponse",
+        "is_empty",
+        "citations"
+      ],
+      "require_citations": true,
+      "tags": [
+        "response",
+        "empty_result"
+      ]
+    },
+    {
+      "id": "mcp_003",
+      "question": "list_collections 返回的集合信息包含哪些主要字段？",
+      "repository_ids": [],
+      "expected_file_paths": [
+        "src/mcp_server/tools/list_collections.py"
+      ],
+      "expected_citations": [],
+      "must_include": [
+        "name",
+        "count",
+        "metadata"
+      ],
+      "require_citations": true,
+      "tags": [
+        "mcp",
+        "collections"
+      ]
+    },
+    {
+      "id": "mcp_004",
+      "question": "get_document_summary 返回的文档摘要对象包含哪些核心字段？",
+      "repository_ids": [],
+      "expected_file_paths": [
+        "src/mcp_server/tools/get_document_summary.py"
+      ],
+      "expected_citations": [],
+      "must_include": [
+        "doc_id",
+        "title",
+        "summary",
+        "tags",
+        "chunk_count"
+      ],
+      "require_citations": true,
+      "tags": [
+        "mcp",
+        "document_summary"
+      ]
+    },
+    {
+      "id": "eval_001",
+      "question": "scripts/evaluate.py 默认读取哪个 golden test set？它会初始化哪些关键评估组件？",
+      "repository_ids": [],
+      "expected_file_paths": [
+        "scripts/evaluate.py",
+        "src/observability/evaluation/eval_runner.py"
+      ],
+      "expected_citations": [],
+      "must_include": [
+        "tests/fixtures/golden_test_set.json",
+        "EvalRunner",
+        "HybridSearch"
+      ],
+      "require_citations": true,
+      "tags": [
+        "evaluation",
+        "entrypoint"
+      ]
+    },
+    {
+      "id": "eval_002",
+      "question": "EvalRunner 里的 GoldenTestCase 主要包含哪些字段？",
+      "repository_ids": [],
+      "expected_file_paths": [
+        "src/observability/evaluation/eval_runner.py"
+      ],
+      "expected_citations": [],
+      "must_include": [
+        "query",
+        "expected_chunk_ids",
+        "expected_sources",
+        "reference_answer"
+      ],
+      "require_citations": true,
+      "tags": [
+        "evaluation",
+        "dataset_schema"
+      ]
+    },
+    {
+      "id": "eval_003",
+      "question": "RagasEvaluator 支持哪些核心评估指标？",
+      "repository_ids": [],
+      "expected_file_paths": [
+        "src/observability/evaluation/ragas_evaluator.py"
+      ],
+      "expected_citations": [],
+      "must_include": [
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision"
+      ],
+      "require_citations": true,
+      "tags": [
+        "evaluation",
+        "ragas"
+      ]
+    },
+    {
+      "id": "obs_001",
+      "question": "Dashboard 在 app.py 里注册了哪些页面？",
+      "repository_ids": [],
+      "expected_file_paths": [
+        "src/observability/dashboard/app.py"
+      ],
+      "expected_citations": [],
+      "must_include": [
+        "Overview",
+        "Query Traces",
+        "Evaluation Panel"
+      ],
+      "require_citations": true,
+      "tags": [
+        "dashboard",
+        "observability"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+.hotQuestions {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 15px;
+  margin-top: 10px;
+  margin-bottom: 50px;
+}
+
+.hotQuestion {
+  display: flex;
+  align-items: center;
+  background-color: #fff;
+  padding: 7px 12px 7px 8px;
+  border-radius: 12px;
+  border: solid 1px #e5e5e5;
+  cursor: pointer;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background-color: #e5e7ed;
+  }
+}
+
+.emoji {
+  margin-right: 8px;
+  padding: 0 2px;
+  font-size: 18px;
+  border-radius: 8px;
+  background-color: #e5e7ed;
+}
+
+.title {
+  font-size: 14px;
+  color: #333;
+}
