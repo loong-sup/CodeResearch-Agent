@@ -1,166 +1,143 @@
-# Agent 评估方案
+# CodeResearch Agent 评估方案
 
-这个目录提供一套贴合当前项目实现的 `agent` 评测方案，重点覆盖 `deep_research` 和 `ai_search` 两条链路。
+这个目录用于评估当前项目的代码知识库 Agent。新版方案不再只看“回答像不像”，而是把 Agent 的关键链路拆开评估：
 
-## 为什么这样设计
+1. 代码库检索是否找到正确文件
+2. 回答是否带代码引用
+3. 网络搜索是否真的被调用，并能和代码证据融合
+4. 多轮会话/记忆问题是否能回答
+5. 是否避免“请提供某目录源码”这类证据缺失话术
+6. 流式接口是否稳定返回答案、引用和结束信号
 
-当前项目里的 agent 本质上是一个“代码库问答 + 检索增强生成”系统，核心链路包括：
+## 文件说明
 
-1. 仓库上下文解析与绑定
-2. 检索召回
-3. `deep_research` 下的 `plan -> retrieval -> reflection -> final answer`
-4. 流式输出 `documents`、`citations`、`thinking`、最终回答
-5. 会话与结果落库
+`agent_eval_suite.v2.json`
+新版评估集，覆盖代码实现、工具注册、网络搜索融合、记忆、多轮上下文和 README 依赖回归。
 
-因此，评估不能只看“答得像不像”，还要分层看：
+`codebase_agent_golden_set.example.json`
+旧版基础样例，适合继续扩充单轮代码问答 case。
 
-1. 检索是否找对文件和证据
-2. 回答是否引用了正确上下文
-3. 回答是否覆盖了关键事实
-4. 端到端时延和稳定性是否可接受
+`../scripts/run_agent_eval.py`
+端到端评估脚本，会调用 `deep_research` 或 `ai_search` 接口，解析 SSE 输出并生成 JSON 报告。
 
-## 目录说明
+## 评估指标
 
-1. `codebase_agent_golden_set.example.json`
-   一个黄金评测集样例，你可以按同样结构扩充到 30-100 条。
-2. `../scripts/run_agent_eval.py`
-   批量调用后端接口并产出评测报告。
+基础指标：
 
-## 推荐的评估层次
+- `has_answer`: 是否生成了最终答案。
+- `latency_seconds`: 单轮端到端耗时。
+- `documents_count`: 后端返回的证据文档数量。
+- `citations_count`: 后端返回的代码引用数量。
+- `score`: 当前 case 的规则平均分。
 
-### 1. 离线自动评估
+代码库指标：
 
-适合每次改检索、Prompt、引用格式、模型配置后跑一次。
+- `has_citations`: 需要引用时，是否真的返回引用。
+- `expected_file_path_recall`: 期望代码文件是否被 `documents/citations` 命中。
+- `expected_citation_recall`: 期望引用片段是否被命中。
+- `must_include_recall`: 答案是否包含关键事实。
+- `must_not_include_pass`: 答案是否避开明确错误内容。
+- `failure_phrase_pass`: 是否避开“证据不足、请提供目录”等失败话术。
 
-建议重点看这些指标：
+网络搜索指标：
 
-1. `has_answer`
-   是否生成了有效答案。
-2. `has_citations`
-   当题目要求引用时，是否真的返回了引用。
-3. `expected_file_path_recall`
-   题目标注的目标文件，是否被 agent 的 `documents/citations` 命中。
-4. `expected_citation_recall`
-   如果你已经细化到具体引用片段，可直接检查召回率。
-5. `must_include_recall`
-   答案是否覆盖了关键术语或关键结论。
-6. `must_not_include_pass`
-   是否避免了明显错误结论。
-7. `latency_seconds`
-   端到端耗时。
+- `web_search_called_pass`: 要求联网时，是否真的走了网络搜索链路或返回搜索状态。
+- `web_search_has_results_pass`: 要求联网时，是否获得了搜索结果。
+- `web_must_include_recall`: 网络结果中是否包含期望外部知识，例如 `Model Context Protocol`、`Serper`。
 
-### 2. 人工审查
+记忆指标：
 
-自动规则适合做回归，但不能完全替代人工判断。建议每次从评测集中抽 10 条看下面 4 项：
+- `memory_answer_recall`: 多轮场景下，答案是否能召回前文问题或对话主题。
 
-1. 结论是否忠实于代码证据
-2. 引用是否真的支撑结论
-3. 是否回答了用户真正的问题
-4. 是否存在“看起来合理但代码里没有”的幻觉
+## 数据集格式
 
-建议使用 1-5 分打分，分别对：
-
-1. 正确性
-2. 忠实度
-3. 完整性
-4. 可读性
-
-### 3. 在线抽样评估
-
-项目当前已经把 `model_answer`、`documents`、`recommended_questions`、`think` 写入数据库，可以从真实会话中每周抽样：
-
-1. 高价值问题
-2. 用户追问次数多的问题
-3. 无引用或低引用的问题
-4. 失败或报错的问题
-
-## 推荐的数据集构成
-
-第一版建议先做 30 条，按下面比例构建：
-
-1. 文件职责类：8 条
-2. 调用链类：8 条
-3. 配置来源类：6 条
-4. 数据流/落库类：4 条
-5. 异常与边界类：4 条
-
-如果后续更关注销售业务 agent，而不是代码问答 agent，再单独补“业务知识正确性”数据集，不要和代码库问答集混在一起。
-
-## 数据集字段说明
-
-每条 case 支持以下字段：
+单轮 case：
 
 ```json
 {
-  "id": "mcp_001",
-  "question": "query_knowledge_hub 工具的主要输入参数有哪些？",
+  "id": "code_mcp_server_impl",
+  "question": "请说明这个项目里的 MCP Server 是怎么实现的。",
   "repository_ids": [],
+  "web_search": false,
   "expected_file_paths": [
-    "src/mcp_server/tools/query_knowledge_hub.py"
+    "src/mcp_server/protocol_handler.py",
+    "src/mcp_server/server.py"
   ],
-  "expected_citations": [],
-  "must_include": ["query_knowledge_hub", "query", "top_k", "collection"],
-  "must_not_include": [],
+  "must_include": ["create_mcp_server", "ProtocolHandler", "tools/list", "tools/call"],
+  "must_not_include": ["请提供 src/mcp_server"],
   "require_citations": true,
-  "tags": ["mcp", "tool_schema"]
+  "forbid_failure_phrases": true,
+  "tags": ["code_first", "mcp"]
 }
 ```
 
-字段含义：
+多轮 case：
 
-1. `expected_file_paths`
-   期望命中的文件路径，可用于衡量检索质量。
-2. `expected_citations`
-   如果你希望更严格，可以标到具体引用片段，例如 `src/mcp_server/tools/query_knowledge_hub.py:49-68`。
-3. `must_include`
-   期望答案中出现的关键词或关键结论。
-4. `must_not_include`
-   明确不该出现的错误关键词。
-5. `require_citations`
-   是否要求 agent 提供引用。
+```json
+{
+  "id": "memory_previous_question",
+  "repository_ids": [],
+  "web_search": false,
+  "turns": [
+    {
+      "message": "请解释 src/mcp_server/protocol_handler.py 的作用。",
+      "expected_file_paths": ["src/mcp_server/protocol_handler.py"],
+      "require_citations": true
+    },
+    {
+      "message": "我上一个问题是什么？",
+      "require_memory": true,
+      "memory_must_include": ["src/mcp_server/protocol_handler.py"]
+    }
+  ]
+}
+```
 
-## 如何执行
+## 如何运行
 
-先启动后端服务，再运行：
+先启动后端服务，然后执行：
 
 ```bash
 cd backend/app
 python scripts/run_agent_eval.py \
-  --dataset evals/codebase_agent_golden_set.example.json \
+  --dataset evals/agent_eval_suite.v2.json \
   --endpoint deep_research \
   --base-url http://127.0.0.1:8000 \
-  --output evals/reports/deep_research_report.json
+  --output evals/reports/deep_research_v2_report.json
 ```
 
-如果你想拿 `ai_search` 做基线对比：
+对比普通搜索链路：
 
 ```bash
 cd backend/app
 python scripts/run_agent_eval.py \
-  --dataset evals/codebase_agent_golden_set.example.json \
+  --dataset evals/agent_eval_suite.v2.json \
   --endpoint ai_search \
   --base-url http://127.0.0.1:8000 \
-  --output evals/reports/ai_search_report.json
+  --output evals/reports/ai_search_v2_report.json
 ```
 
-## 建议的验收门槛
+## 建议验收门槛
 
-第一版可以先用下面的经验阈值：
+第一阶段可以用下面的阈值作为回归门禁：
 
-1. `has_answer >= 0.98`
-2. `has_citations >= 0.90`
-3. `expected_file_path_recall >= 0.75`
-4. `must_include_recall >= 0.80`
-5. `must_not_include_pass >= 0.95`
-6. `p95 latency_seconds` 不超过你当前可接受的交互时延
+- `has_answer >= 0.98`
+- `has_citations >= 0.90`
+- `expected_file_path_recall >= 0.75`
+- `must_include_recall >= 0.80`
+- `failure_phrase_pass >= 0.95`
+- `web_search_called_pass = 1.0`，仅针对要求联网的 case
+- `web_search_has_results_pass >= 0.80`，仅针对要求联网的 case
+- `memory_answer_recall >= 0.80`，仅针对记忆 case
 
-如果 `deep_research` 在 `expected_file_path_recall` 和 `must_include_recall` 上持续优于 `ai_search`，就说明多阶段 agent 设计是有收益的。
+## 人工评估维度
 
-## 后续可扩展方向
+自动评估只能做回归防线。每次改 Agent 流程、Prompt、检索策略、网络搜索策略后，建议抽样人工打分：
 
-这套方案目前是“零额外依赖”的规则评估版，适合作为第一层回归防线。后续你可以继续扩展：
+- 正确性：结论是否正确。
+- 忠实度：结论是否被代码引用或网络来源支撑。
+- 完整性：是否回答了用户真正的问题。
+- 可读性：是否能帮助用户理解代码执行过程，而不是复述 README。
+- 工具使用合理性：需要联网时是否联网，不需要联网时是否坚持代码优先。
 
-1. 增加 `LLM-as-Judge`，评估忠实度和完整度
-2. 增加基于历史消息表的线上样本回放
-3. 对 `plan`、`reflection` 中间动作单独统计成功率
-4. 把报告接到 CI，做变更前后对比
+每项 1-5 分，低于 4 分的样本应补进 `agent_eval_suite.v2.json` 作为回归 case。

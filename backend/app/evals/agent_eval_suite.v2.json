@@ -1,0 +1,220 @@
+{
+  "description": "CodeResearch Agent v2 evaluation suite: code-first answers, web-search fusion, memory, and failure-mode regression.",
+  "version": "2.0",
+  "test_cases": [
+    {
+      "id": "code_mcp_server_impl",
+      "question": "请说明这个项目里的 MCP Server 是怎么实现的，包括 Server 创建、tools/list 和 tools/call 的处理。",
+      "repository_ids": [],
+      "web_search": false,
+      "expected_file_paths": [
+        "src/mcp_server/protocol_handler.py",
+        "src/mcp_server/server.py",
+        "src/mcp_server/tools/query_knowledge_hub.py"
+      ],
+      "must_include": [
+        "create_mcp_server",
+        "ProtocolHandler",
+        "tools/list",
+        "tools/call"
+      ],
+      "must_not_include": [
+        "请提供 src/mcp_server",
+        "无法说明 MCP Server"
+      ],
+      "require_citations": true,
+      "forbid_failure_phrases": true,
+      "tags": [
+        "code_first",
+        "mcp",
+        "implementation"
+      ]
+    },
+    {
+      "id": "code_mcp_tool_registration",
+      "question": "query_knowledge_hub、list_collections、get_document_summary 这三个 MCP 工具是在哪里注册的？它们各自做什么？",
+      "repository_ids": [],
+      "web_search": false,
+      "expected_file_paths": [
+        "src/mcp_server/protocol_handler.py",
+        "src/mcp_server/tools/query_knowledge_hub.py",
+        "src/mcp_server/tools/list_collections.py",
+        "src/mcp_server/tools/get_document_summary.py"
+      ],
+      "must_include": [
+        "register_tool",
+        "query_knowledge_hub",
+        "list_collections",
+        "get_document_summary"
+      ],
+      "require_citations": true,
+      "forbid_failure_phrases": true,
+      "tags": [
+        "code_first",
+        "tool_registration"
+      ]
+    },
+    {
+      "id": "web_mcp_concept_plus_code",
+      "question": "请从网络搜索中告诉我什么是 MCP？再结合这个项目说明 MCP Server 是怎么实现的。",
+      "repository_ids": [],
+      "web_search": true,
+      "require_web_search": true,
+      "web_must_include": [
+        "Model Context Protocol"
+      ],
+      "expected_file_paths": [
+        "src/mcp_server/protocol_handler.py",
+        "src/mcp_server/server.py"
+      ],
+      "must_include": [
+        "外部资料补充",
+        "Model Context Protocol",
+        "create_mcp_server",
+        "ProtocolHandler"
+      ],
+      "must_not_include": [
+        "请提供 src/mcp_server",
+        "本次网络搜索未获得可用结果"
+      ],
+      "require_citations": true,
+      "forbid_failure_phrases": true,
+      "tags": [
+        "web_fusion",
+        "mcp",
+        "code_plus_external"
+      ]
+    },
+    {
+      "id": "web_serper_plus_code",
+      "question": "请结合网络资料和当前项目代码，说明网络搜索工具是如何通过 Serper 接入并参与回答的。",
+      "repository_ids": [],
+      "web_search": true,
+      "require_web_search": true,
+      "web_must_include": [
+        "Serper"
+      ],
+      "expected_file_paths": [
+        "backend/app/service/web_search/web_search.py",
+        "backend/app/service/agent/agent.py",
+        "frontend/src/components/sender/index.tsx"
+      ],
+      "must_include": [
+        "SERPER_API_KEY",
+        "serper_search",
+        "web_search",
+        "网络来源"
+      ],
+      "require_citations": true,
+      "tags": [
+        "web_fusion",
+        "current_project",
+        "tool_calling"
+      ]
+    },
+    {
+      "id": "memory_previous_question",
+      "repository_ids": [],
+      "web_search": false,
+      "turns": [
+        {
+          "message": "请解释 src/mcp_server/protocol_handler.py 的作用。",
+          "expected_file_paths": [
+            "src/mcp_server/protocol_handler.py"
+          ],
+          "must_include": [
+            "ProtocolHandler"
+          ],
+          "require_citations": true
+        },
+        {
+          "message": "我上一个问题是什么？",
+          "require_memory": true,
+          "memory_must_include": [
+            "src/mcp_server/protocol_handler.py"
+          ],
+          "must_include": [
+            "src/mcp_server/protocol_handler.py"
+          ],
+          "must_not_include": [
+            "代码库",
+            "配置范围"
+          ]
+        }
+      ],
+      "tags": [
+        "memory",
+        "multi_turn"
+      ]
+    },
+    {
+      "id": "memory_conversation_summary",
+      "repository_ids": [],
+      "web_search": false,
+      "turns": [
+        {
+          "message": "请说明 query_knowledge_hub 工具的输入参数。",
+          "expected_file_paths": [
+            "src/mcp_server/tools/query_knowledge_hub.py"
+          ],
+          "must_include": [
+            "query_knowledge_hub"
+          ],
+          "require_citations": true
+        },
+        {
+          "message": "请说明 list_collections 工具返回哪些字段。",
+          "expected_file_paths": [
+            "src/mcp_server/tools/list_collections.py"
+          ],
+          "must_include": [
+            "list_collections"
+          ],
+          "require_citations": true
+        },
+        {
+          "message": "总结一下本轮对话里我问过哪些问题。",
+          "require_memory": true,
+          "memory_must_include": [
+            "query_knowledge_hub",
+            "list_collections"
+          ],
+          "must_include": [
+            "query_knowledge_hub",
+            "list_collections"
+          ]
+        }
+      ],
+      "tags": [
+        "memory",
+        "summary",
+        "multi_turn"
+      ]
+    },
+    {
+      "id": "code_file_role_no_readme_only",
+      "question": "请查看 src/mcp_server/server.py 程序，实现了哪些功能？",
+      "repository_ids": [],
+      "web_search": false,
+      "expected_file_paths": [
+        "src/mcp_server/server.py"
+      ],
+      "must_include": [
+        "stdio",
+        "Server",
+        "入口"
+      ],
+      "must_not_include": [
+        "README",
+        "请提供"
+      ],
+      "require_citations": true,
+      "forbid_failure_phrases": true,
+      "tags": [
+        "file_role",
+        "code_first",
+        "readme_regression"
+      ]
+    }
+  ]
+}

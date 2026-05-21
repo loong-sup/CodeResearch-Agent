@@ -27,7 +27,7 @@ from service.repository_service import create_repository_from_source, resolve_re
 from service.repository_overview import build_repository_overview_evidence, is_repository_overview_query
 from utils.database import get_db
 from utils.prompt import CodebaseAnswerPrompt, GeneralAnswerPrompt
-from utils.query_intent import QueryIntent, chitchat_answer, classify_query_intent
+from utils.query_intent import QueryIntent, chitchat_answer, classify_query_intent_detail
 import json
 
 # 加载 .env 文件
@@ -237,7 +237,15 @@ async def ai_search(
         user_id = '1'
         
         question = request.message
-        query_intent = classify_query_intent(question)
+        intent_result = classify_query_intent_detail(question)
+        query_intent = intent_result.intent
+        logger.info(
+            "query intent: intent=%s confidence=%.2f signals=%s secondary=%s",
+            intent_result.intent,
+            intent_result.confidence,
+            intent_result.signals,
+            intent_result.secondary,
+        )
         explicit_repository_ids = request.repository_ids or (
             [request.repository_id] if request.repository_id else None
         )
@@ -402,7 +410,15 @@ async def deep_research(
     try:
         user_id = "1"
         question = request.message
-        query_intent = classify_query_intent(question)
+        intent_result = classify_query_intent_detail(question)
+        query_intent = intent_result.intent
+        logger.info(
+            "deep research query intent: intent=%s confidence=%.2f signals=%s secondary=%s",
+            intent_result.intent,
+            intent_result.confidence,
+            intent_result.signals,
+            intent_result.secondary,
+        )
         if query_intent == QueryIntent.MEMORY:
             return StreamingResponse(
                 stream_memory_answer(
@@ -413,7 +429,7 @@ async def deep_research(
                 media_type="text/event-stream",
             )
 
-        if query_intent in (QueryIntent.CHITCHAT, QueryIntent.GENERAL):
+        if query_intent == QueryIntent.CHITCHAT:
             return StreamingResponse(
                 final_answer(
                     question,
@@ -425,6 +441,33 @@ async def deep_research(
                     persist_history=True,
                 ),
                 media_type="text/event-stream"
+            )
+
+        if query_intent == QueryIntent.GENERAL:
+            snippets = []
+            if request.web_search:
+                try:
+                    from service.web_search.web_search import process_search_results, serper_search
+
+                    search_results = serper_search(question)
+                    snippets, _ = process_search_results(search_results)
+                except Exception as e:
+                    logger.warning(f"web search failed: {e}")
+            history_questions = get_user_history_questions(session_id)
+            final_prompt = GeneralAnswerPrompt % (
+                json.dumps(snippets, ensure_ascii=False, indent=2),
+                history_questions,
+                question,
+            )
+            return StreamingResponse(
+                get_general_chat_completion(
+                    session_id=session_id,
+                    question=question,
+                    user_id=user_id,
+                    final_prompt=final_prompt,
+                    snippets=snippets,
+                ),
+                media_type="text/event-stream",
             )
 
         explicit_repository_ids = request.repository_ids or (

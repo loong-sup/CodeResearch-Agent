@@ -3,14 +3,19 @@ from llama_index.core.data_structs import Node
 from llama_index.core.schema import NodeWithScore
 from llama_index.postprocessor.dashscope_rerank import DashScopeRerank
 import numpy as np
+from service.model_config import (
+    get_embedding_api_key,
+    get_embedding_base_url,
+    get_embedding_dimensions,
+    get_embedding_model,
+)
 
-import os
 from dotenv import load_dotenv
 load_dotenv()
 
 
 def rerank_similarity(query, texts):
-    api_key = os.getenv("DASHSCOPE_API_KEY")
+    api_key = get_embedding_api_key()
     # 创建节点列表
     nodes = [NodeWithScore(node=Node(text=text), score=1.0) for text in texts]
 
@@ -29,7 +34,7 @@ def rerank_similarity(query, texts):
 
 # 知识库和web搜索重拍序
 def rerank_results(query, texts):
-    api_key = os.getenv("DASHSCOPE_API_KEY")
+    api_key = get_embedding_api_key()
     
     # 创建节点列表
     nodes = [NodeWithScore(node=Node(text=text), score=1.0) for text in texts]
@@ -51,9 +56,11 @@ def rerank_results(query, texts):
     return top_scores, top_texts
 
 
-def generate_embedding(text: str, api_key: str = None, base_url: str = None, model_name: str = "text-embedding-v3", dimensions: int = 1024, encoding_format: str = "float"):
-    api_key = os.getenv("DASHSCOPE_API_KEY")
-    base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"    
+def generate_embedding(text: str, api_key: str = None, base_url: str = None, model_name: str = None, dimensions: int = None, encoding_format: str = "float"):
+    api_key = api_key or get_embedding_api_key()
+    base_url = base_url or get_embedding_base_url()
+    model_name = model_name or get_embedding_model()
+    dimensions = dimensions or get_embedding_dimensions()
 
     # 初始化 OpenAI 客户端
     client = OpenAI(
@@ -74,4 +81,3 @@ def generate_embedding(text: str, api_key: str = None, base_url: str = None, mod
     except Exception as e:
         print(f"OpenAI API 请求失败: {e}")
         return None
-

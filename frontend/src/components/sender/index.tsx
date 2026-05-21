@@ -52,6 +52,7 @@ export default function ComSender(
     repositoryLoading?: boolean
     repositoryContext?: API.RepositoryContext[]
     onRepositoryChange?: (repositoryId?: string) => void
+    onRepositoryRefresh?: () => void | Promise<void>
     onRecommendRepository?: (message: string) => Promise<void>
   }>,
 ) {
@@ -65,6 +66,7 @@ export default function ComSender(
     repositoryLoading,
     repositoryContext,
     onRepositoryChange,
+    onRepositoryRefresh,
     onRecommendRepository,
     ...rest
   } = props
@@ -168,6 +170,11 @@ export default function ComSender(
                 value={selectedRepositoryId}
                 loading={repositoryLoading}
                 options={repositoryOptions}
+                notFoundContent={repositoryLoading ? '加载中...' : '暂无可用代码库'}
+                onOpenChange={(open) => {
+                  if (open) onRepositoryRefresh?.()
+                }}
+                onFocus={() => onRepositoryRefresh?.()}
                 onChange={(nextValue) => onRepositoryChange?.(nextValue)}
               />
             </div>
@@ -247,6 +254,7 @@ export default function ComSender(
               color={session.useWeb ? 'primary' : 'default'}
               variant={session.useWeb ? 'filled' : 'outlined'}
               icon={<GlobalOutlined />}
+              onClick={() => sessionActions.setUseWeb(!session.useWeb)}
             >
               网络搜索
             </Button>

@@ -10,6 +10,14 @@ import requests
 
 
 DEFAULT_TIMEOUT = 180
+DEFAULT_FAILURE_PHRASES = [
+    "请提供",
+    "无法说明",
+    "无法回答",
+    "证据不足",
+    "未在当前证据中提供",
+    "没有包含",
+]
 
 
 def load_dataset(path: str) -> dict[str, Any]:
@@ -57,6 +65,15 @@ def calc_recall(expected: list[str], actual: list[str]) -> float | None:
     return hits / len(expected)
 
 
+def calc_substring_recall(expected: list[str], actual: list[str]) -> float | None:
+    if not expected:
+        return None
+
+    actual_text = "\n".join(safe_lower(item) for item in actual if item)
+    hits = sum(1 for item in expected if safe_lower(item) in actual_text)
+    return hits / len(expected)
+
+
 def parse_sse_response(response: requests.Response) -> dict[str, Any]:
     documents: list[dict[str, Any]] = []
     citations: list[dict[str, Any]] = []
@@ -64,6 +81,9 @@ def parse_sse_response(response: requests.Response) -> dict[str, Any]:
     thinking_parts: list[str] = []
     recommended_questions: list[str] = []
     repository_context: list[dict[str, Any]] = []
+    web_search: list[dict[str, Any]] = []
+    web_search_status: dict[str, Any] = {}
+    agent_updates: list[str] = []
     errors: list[str] = []
 
     current_event = "message"
@@ -105,6 +125,10 @@ def parse_sse_response(response: requests.Response) -> dict[str, Any]:
             recommended_questions = payload["recommended_questions"]
         if payload.get("repository_context"):
             repository_context = payload["repository_context"]
+        if payload.get("web_search"):
+            web_search = payload["web_search"]
+        if payload.get("web_search_status"):
+            web_search_status = payload["web_search_status"]
 
         if payload.get("role") == "assistant":
             content = payload.get("content", "")
@@ -112,6 +136,8 @@ def parse_sse_response(response: requests.Response) -> dict[str, Any]:
                 thinking_parts.append(content)
             else:
                 answer_parts.append(content)
+        if payload.get("role") == "agent" and payload.get("content"):
+            agent_updates.append(payload["content"])
 
     return {
         "documents": documents,
@@ -120,36 +146,52 @@ def parse_sse_response(response: requests.Response) -> dict[str, Any]:
         "thinking": "".join(thinking_parts).strip(),
         "recommended_questions": recommended_questions,
         "repository_context": repository_context,
+        "web_search": web_search,
+        "web_search_status": web_search_status,
+        "agent_updates": agent_updates,
         "errors": errors,
     }
 
 
-def run_single_case(
+def post_turn(
     base_url: str,
     endpoint: str,
-    case: dict[str, Any],
+    session_id: str,
+    turn: dict[str, Any],
+    case_defaults: dict[str, Any],
     timeout: int,
 ) -> dict[str, Any]:
-    session_id = uuid.uuid4().hex[:16]
     url = f"{base_url.rstrip('/')}/{endpoint.strip('/')}/"
     params = {"session_id": session_id}
     payload = {
-        "message": case["question"],
+        "message": turn["message"],
     }
-    if case.get("repository_id"):
-        payload["repository_id"] = case["repository_id"]
-    if case.get("repository_ids") is not None:
-        payload["repository_ids"] = case["repository_ids"]
+    for key in ("repository_id", "repository_ids", "web_search", "deep_research"):
+        if key in turn:
+            payload[key] = turn[key]
+        elif key in case_defaults:
+            payload[key] = case_defaults[key]
 
     started_at = time.perf_counter()
     with requests.post(url, params=params, json=payload, stream=True, timeout=timeout) as response:
         response.raise_for_status()
         parsed = parse_sse_response(response)
     elapsed_seconds = time.perf_counter() - started_at
+    parsed["latency_seconds"] = round(elapsed_seconds, 3)
+    parsed["payload"] = payload
+    return parsed
 
+
+def evaluate_turn(
+    endpoint: str,
+    turn: dict[str, Any],
+    parsed: dict[str, Any],
+) -> tuple[dict[str, float], dict[str, Any]]:
     documents = parsed["documents"]
     citations = parsed["citations"]
     answer = parsed["answer"]
+    web_search = parsed["web_search"]
+    web_search_status = parsed["web_search_status"]
 
     actual_file_paths = sorted(
         {
@@ -168,30 +210,56 @@ def run_single_case(
 
     metrics: dict[str, float] = {
         "has_answer": 1.0 if answer else 0.0,
-        "latency_seconds": round(elapsed_seconds, 3),
+        "latency_seconds": parsed["latency_seconds"],
         "documents_count": float(len(documents)),
         "citations_count": float(len(citations)),
+        "web_search_count": float(len(web_search)),
     }
 
-    require_citations = case.get("require_citations", False)
+    require_citations = turn.get("require_citations", False)
     if require_citations:
         metrics["has_citations"] = 1.0 if citations else 0.0
 
-    file_path_recall = calc_recall(case.get("expected_file_paths", []), actual_file_paths)
+    file_path_recall = calc_recall(turn.get("expected_file_paths", []), actual_file_paths)
     if file_path_recall is not None:
         metrics["expected_file_path_recall"] = file_path_recall
 
-    citation_recall = calc_recall(case.get("expected_citations", []), actual_citations)
+    citation_recall = calc_recall(turn.get("expected_citations", []), actual_citations)
     if citation_recall is not None:
         metrics["expected_citation_recall"] = citation_recall
 
-    must_include_recall = contains_all_keywords(answer, case.get("must_include", []))
+    must_include_recall = contains_all_keywords(answer, turn.get("must_include", []))
     if must_include_recall is not None:
         metrics["must_include_recall"] = must_include_recall
 
-    must_not_include_pass = contains_no_forbidden_keywords(answer, case.get("must_not_include", []))
+    must_not_include_pass = contains_no_forbidden_keywords(answer, turn.get("must_not_include", []))
     if must_not_include_pass is not None:
         metrics["must_not_include_pass"] = must_not_include_pass
+
+    failure_phrase_pass = contains_no_forbidden_keywords(
+        answer,
+        turn.get("failure_phrases", DEFAULT_FAILURE_PHRASES) if turn.get("forbid_failure_phrases") else [],
+    )
+    if failure_phrase_pass is not None:
+        metrics["failure_phrase_pass"] = failure_phrase_pass
+
+    if turn.get("require_web_search"):
+        metrics["web_search_called_pass"] = 1.0 if web_search or web_search_status else 0.0
+        metrics["web_search_has_results_pass"] = 1.0 if web_search else 0.0
+
+    web_must_include_recall = calc_substring_recall(
+        turn.get("web_must_include", []),
+        [
+            item
+            for result in web_search
+            for item in (result.get("title", ""), result.get("url", ""), result.get("content", ""))
+        ],
+    )
+    if web_must_include_recall is not None:
+        metrics["web_must_include_recall"] = web_must_include_recall
+
+    if turn.get("require_memory"):
+        metrics["memory_answer_recall"] = contains_all_keywords(answer, turn.get("memory_must_include", [])) or 0.0
 
     score_candidates = [
         value
@@ -201,13 +269,9 @@ def run_single_case(
     ]
     metrics["score"] = mean(score_candidates) if score_candidates else 0.0
 
-    return {
-        "id": case.get("id"),
-        "question": case["question"],
-        "tags": case.get("tags", []),
+    details = {
+        "message": turn["message"],
         "endpoint": endpoint,
-        "session_id": session_id,
-        "metrics": metrics,
         "answer": answer,
         "thinking": parsed["thinking"],
         "documents": documents,
@@ -216,8 +280,99 @@ def run_single_case(
         "actual_citations": actual_citations,
         "recommended_questions": parsed["recommended_questions"],
         "repository_context": parsed["repository_context"],
+        "web_search": web_search,
+        "web_search_status": web_search_status,
+        "agent_updates": parsed["agent_updates"],
         "errors": parsed["errors"],
     }
+    return metrics, details
+
+
+def normalize_turns(case: dict[str, Any]) -> list[dict[str, Any]]:
+    if "turns" in case:
+        turns = case["turns"]
+        if not isinstance(turns, list) or not turns:
+            raise ValueError("case.turns must be a non-empty list")
+        return turns
+    if "question" not in case:
+        raise ValueError("case must contain either 'question' or 'turns'")
+    return [
+        {
+            key: value
+            for key, value in case.items()
+            if key
+            not in {
+                "id",
+                "tags",
+                "description",
+            }
+        }
+        | {"message": case["question"]}
+    ]
+
+
+def run_single_case(
+    base_url: str,
+    endpoint: str,
+    case: dict[str, Any],
+    timeout: int,
+) -> dict[str, Any]:
+    session_id = uuid.uuid4().hex[:16]
+    case_defaults = {
+        key: case[key]
+        for key in ("repository_id", "repository_ids", "web_search", "deep_research")
+        if key in case
+    }
+    turns = normalize_turns(case)
+    turn_results = []
+    all_metrics = []
+
+    for turn_index, turn in enumerate(turns, start=1):
+        parsed = post_turn(
+            base_url=base_url,
+            endpoint=endpoint,
+            session_id=session_id,
+            turn=turn,
+            case_defaults=case_defaults,
+            timeout=timeout,
+        )
+        metrics, details = evaluate_turn(endpoint, turn, parsed)
+        details["turn_index"] = turn_index
+        details["metrics"] = metrics
+        turn_results.append(details)
+        all_metrics.append(metrics)
+
+    combined_metrics = aggregate_metric_dicts(all_metrics)
+    return {
+        "id": case.get("id"),
+        "question": case.get("question") or turns[-1]["message"],
+        "tags": case.get("tags", []),
+        "endpoint": endpoint,
+        "session_id": session_id,
+        "metrics": combined_metrics,
+        "turns": turn_results,
+        "answer": turn_results[-1]["answer"],
+        "thinking": turn_results[-1]["thinking"],
+        "documents": turn_results[-1]["documents"],
+        "citations": turn_results[-1]["citations"],
+        "actual_file_paths": turn_results[-1]["actual_file_paths"],
+        "actual_citations": turn_results[-1]["actual_citations"],
+        "recommended_questions": turn_results[-1]["recommended_questions"],
+        "repository_context": turn_results[-1]["repository_context"],
+        "web_search": turn_results[-1]["web_search"],
+        "web_search_status": turn_results[-1]["web_search_status"],
+        "errors": [error for turn_result in turn_results for error in turn_result.get("errors", [])],
+    }
+
+
+def aggregate_metric_dicts(items: list[dict[str, float]]) -> dict[str, float]:
+    keys = sorted({key for item in items for key in item})
+    aggregated = {}
+    for key in keys:
+        values = [item[key] for item in items if key in item]
+        if values:
+            aggregated[key] = round(mean(values), 4)
+    return aggregated
 
 
 def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -260,7 +415,10 @@ def main() -> None:
     results = []
 
     for index, case in enumerate(dataset["test_cases"], start=1):
-        print(f"[{index}/{len(dataset['test_cases'])}] evaluating: {case.get('id', '<no-id>')} - {case['question']}")
+        case_label = case.get("question")
+        if not case_label and case.get("turns"):
+            case_label = case["turns"][-1].get("message", "<multi-turn>")
+        print(f"[{index}/{len(dataset['test_cases'])}] evaluating: {case.get('id', '<no-id>')} - {case_label}")
         try:
             case_result = run_single_case(
                 base_url=args.base_url,
@@ -281,7 +439,7 @@ def main() -> None:
         except Exception as exc:
             error_result = {
                 "id": case.get("id"),
-                "question": case["question"],
+                "question": case_label,
                 "tags": case.get("tags", []),
                 "endpoint": args.endpoint,
                 "metrics": {

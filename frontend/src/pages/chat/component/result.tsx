@@ -209,6 +209,50 @@ const 代码库上下文 = (props: { item: API.ChatItem }) => {
   )
 }
 
+const 网络来源 = (props: { item: API.ChatItem }) => {
+  const { item } = props
+
+  if (!item.web_search?.length && !item.web_search_status) return null
+
+  return (
+    <Section title="网络来源" icon={IconSource}>
+      <div className={styles['chat-message-result__source']}>
+        {item.web_search_status && !item.web_search?.length ? (
+          <div className={styles.item}>
+            <div className={styles.header}>
+              <div className={styles.url}>网络搜索未返回可用结果</div>
+            </div>
+            <div className={styles.content}>
+              {item.web_search_status.error || '请检查 SERPER_API_KEY 或网络连接。'}
+            </div>
+            {item.web_search_status.queries?.length ? (
+              <div className={styles.content}>
+                查询：{item.web_search_status.queries.join(' / ')}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {item.web_search?.map((source) => (
+          <div
+            key={source.url}
+            className={styles.item}
+            onClick={() => window.open(source.url, '_blank')}
+          >
+            <div className={styles.header}>
+              <div className={styles.url}>{source.url}</div>
+            </div>
+            <div className={styles.title}>{source.title}</div>
+            <div className={styles.content}>{source.content}</div>
+            {source.query ? (
+              <div className={styles.content}>查询：{source.query}</div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </Section>
+  )
+}
+
 const 笔记 = (props: { item: API.ChatItem }) => {
   const { item } = props
   console.log(item)
@@ -378,6 +422,8 @@ export function Result(props: {
       {item.repository_context?.length ? <代码库上下文 item={item} /> : null}
 
       {item.citations?.length ? <来源 item={item} /> : null}
+
+      {item.web_search?.length ? <网络来源 item={item} /> : null}
 
       {false ? <笔记 item={item} /> : null}
 

@@ -1,5 +1,3 @@
-from openai import OpenAI
-import os
 import json
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -8,6 +6,7 @@ from fastapi import HTTPException
 from utils import logger
 from service.web_search.web_search import serper_images, serper_videos
 from database.knowledgebase_operations import get_session_memory
+from service.model_config import get_fast_generation_model, get_generation_client, get_generation_model
 
 
 def build_citations_payload(retrieved_content):
@@ -125,13 +124,9 @@ def get_general_chat_completion(
         if snippets:
             yield _sse_message({"web_search": snippets, "answer_scope": "general"})
 
-        client = OpenAI(
-            api_key=os.getenv("DASHSCOPE_API_KEY"),
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-            timeout=60,
-        )
+        client = get_generation_client(timeout=60)
         completion = client.chat.completions.create(
-            model="qwen2.5-72b-instruct",
+            model=get_generation_model(),
             messages=[{"role": "user", "content": final_prompt}],
             stream=True,
         )
@@ -239,13 +234,9 @@ def generate_recommended_questions(user_question, retrieved_content):
     """
     
     try:
-        client = OpenAI(
-                api_key=os.getenv("DASHSCOPE_API_KEY"),
-                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-                timeout=30,
-            )
+        client = get_generation_client(timeout=30)
         completion = client.chat.completions.create(
-            model="qwen2.5-72b-instruct",
+            model=get_fast_generation_model(),
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
             stream=False,
@@ -288,12 +279,9 @@ def generate_session_name(user_question):
     
     # 调用大模型生成会话名称
     try:
-        client = OpenAI(
-                api_key=os.getenv("DASHSCOPE_API_KEY"),
-                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
-            )
+        client = get_generation_client()
         completion = client.chat.completions.create(
-            model="qwen2.5-72b-instruct",
+            model=get_fast_generation_model(),
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
             stream=False,
@@ -465,15 +453,11 @@ def get_chat_completion(
             yield f"event: message\ndata: {json_message}\n\n"
 
         # 初始化 OpenAI 客户端。放在首批 SSE 事件之后，避免模型连接慢时前端完全无响应。
-        client = OpenAI(
-            api_key=os.getenv("DASHSCOPE_API_KEY"),
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-            timeout=60,
-        )
+        client = get_generation_client(timeout=60)
 
         # 创建聊天完成请求
         completion = client.chat.completions.create(
-            model="deepseek-r1",  # 可按需更换模型名称
+            model=get_generation_model(),
             messages=[
                 {"role": "user", "content": final_prompt}
             ],

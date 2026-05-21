@@ -35,6 +35,8 @@ declare namespace API {
     reference?: Document[]
     citations?: Citation[]
     repository_context?: RepositoryContext[]
+    web_search?: WebSearchResult[]
+    web_search_status?: WebSearchStatus
     recommended_questions?: string[]
     image_results?: {
       images?: {
@@ -88,5 +90,19 @@ declare namespace API {
     chunk_kind?: string
     repository_id?: string
     preview?: string
+  }
+
+  interface WebSearchResult {
+    title: string
+    url: string
+    content: string
+    query?: string
+  }
+
+  interface WebSearchStatus {
+    enabled?: boolean
+    queries?: string[]
+    result_count?: number
+    error?: string
   }
 }

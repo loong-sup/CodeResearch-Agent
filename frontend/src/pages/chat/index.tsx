@@ -180,7 +180,7 @@ export default function Index() {
 
   const repositoryOptions = useMemo(() => {
     return (repositories.data || [])
-      .filter((item) => item.repository_id)
+      .filter((item) => item.repository_id && item.status !== 'error')
       .map((item) => ({
         label: item.file_name,
         value: item.repository_id!,
@@ -190,16 +190,55 @@ export default function Index() {
       }))
   }, [repositories.data])
 
+  const updateActiveRepositoryContext = useCallback(
+    (repositoryId?: string) => {
+      if (!repositoryId) {
+        setActiveRepositoryContext([])
+        return
+      }
+
+      const repository = (repositories.data || []).find(
+        (item) => item.repository_id === repositoryId,
+      )
+      if (!repository) return
+
+      setActiveRepositoryContext([
+        {
+          repository_id: repository.repository_id!,
+          repository_name: repository.file_name,
+          repository_type: repository.repository_type,
+          status: repository.status,
+        },
+      ])
+    },
+    [repositories.data],
+  )
+
   useEffect(() => {
     if (!repositoryOptions.length) return
     if (
       selectedRepositoryId &&
       repositoryOptions.some((item) => item.value === selectedRepositoryId)
     ) {
+      updateActiveRepositoryContext(selectedRepositoryId)
       return
     }
-    setSelectedRepositoryId(repositoryOptions[0].value)
-  }, [repositoryOptions, selectedRepositoryId])
+    const firstRepositoryId = repositoryOptions[0].value
+    setSelectedRepositoryId(firstRepositoryId)
+    updateActiveRepositoryContext(firstRepositoryId)
+  }, [repositoryOptions, selectedRepositoryId, updateActiveRepositoryContext])
+
+  const handleRepositoryChange = useCallback(
+    (repositoryId?: string) => {
+      setSelectedRepositoryId(repositoryId)
+      updateActiveRepositoryContext(repositoryId)
+    },
+    [updateActiveRepositoryContext],
+  )
+
+  const refreshRepositories = useCallback(async () => {
+    await repositories.runAsync()
+  }, [repositories])
 
   const loading = useMemo(() => {
     return list.some((o) => o.loading) || history.loading
@@ -320,6 +359,14 @@ export default function Index() {
             target.citations = json.citations
           }
 
+          if (json?.web_search?.length) {
+            target.web_search = json.web_search
+          }
+
+          if (json?.web_search_status) {
+            target.web_search_status = json.web_search_status
+          }
+
           if (json?.repository_context?.length) {
             target.repository_context = json.repository_context
             setActiveRepositoryContext(json.repository_context)
@@ -435,13 +482,25 @@ export default function Index() {
   )
   // 组件挂载时，处理页面间传递的消息或加载历史记录
   useMount(async () => {
-    repositories.run()
+    await repositories.runAsync()
     if (ctx?.data.message) {
       send(ctx.data.message)
     } else {
       history.run()
     }
   })
+
+  useEffect(() => {
+    const refresh = () => {
+      repositories.run()
+    }
+    window.addEventListener('focus', refresh)
+    window.addEventListener('pageshow', refresh)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener('pageshow', refresh)
+    }
+  }, [repositories])
 
   return (
     <ComPageLayout
@@ -453,7 +512,8 @@ export default function Index() {
           selectedRepositoryId={selectedRepositoryId}
           repositoryLoading={repositories.loading}
           repositoryContext={activeRepositoryContext}
-          onRepositoryChange={setSelectedRepositoryId}
+          onRepositoryChange={handleRepositoryChange}
+          onRepositoryRefresh={refreshRepositories}
           onRecommendRepository={async (message) => {
             const { data } = await api.session.getRepositoryCandidates({
               question: message,
@@ -464,7 +524,7 @@ export default function Index() {
               window.$app.message.info('暂未找到匹配的代码库')
               return
             }
-            setSelectedRepositoryId(candidate.repository_id)
+            handleRepositoryChange(candidate.repository_id)
             window.$app.message.success(`已推荐代码库：${candidate.repository_name}`)
           }}
         />

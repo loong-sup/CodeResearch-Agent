@@ -1,4 +1,5 @@
 import re
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 
@@ -7,6 +8,17 @@ class QueryIntent(StrEnum):
     CHITCHAT = "chitchat"
     MEMORY = "memory"
     GENERAL = "general"
+
+
+@dataclass
+class IntentResult:
+    intent: QueryIntent
+    confidence: float
+    signals: list[str] = field(default_factory=list)
+    secondary: list[QueryIntent] = field(default_factory=list)
+    needs_repository: bool = False
+    needs_memory: bool = False
+    needs_web: bool = False
 
 
 CHITCHAT_PATTERNS = (
@@ -61,6 +73,49 @@ CODEBASE_KEYWORDS = (
     "怎么实现",
     "调用链",
     "数据流",
+    "源码",
+    "源代码",
+    "业务逻辑",
+    "初始化",
+    "中间件",
+    "序列化",
+    "反序列化",
+    "权限",
+    "鉴权",
+    "认证",
+    "缓存",
+    "队列",
+    "任务",
+    "模型",
+    "训练",
+    "推理",
+    "损失函数",
+    "优化器",
+    "数据集",
+    "checkpoint",
+    "ckpt",
+    "权重",
+    "脚本",
+    "命令",
+    "参数",
+    "import",
+    "class",
+    "function",
+    "method",
+    "where",
+    "implemented",
+    "implementation",
+    "called",
+    "call chain",
+    "entrypoint",
+    "entry point",
+    "route",
+    "config",
+    "error",
+    "exception",
+    "traceback",
+    "stack trace",
+    "dependency",
 )
 
 CODEBASE_PATTERNS = (
@@ -68,31 +123,150 @@ CODEBASE_PATTERNS = (
     r"\b[A-Za-z_][A-Za-z0-9_]*(Service|Controller|Router|Model|Schema|Config|Client|Manager|Repository|Store|Hook|Provider)\b",
     r"\b(GET|POST|PUT|DELETE|PATCH)\s+/",
     r"/[A-Za-z0-9_./{}:-]+",
+    r"\b[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*\b",
+    r"\b[A-Za-z_][A-Za-z0-9_]*\([^)]*\)",
+    r"\b[a-z]+(?:_[a-z0-9]+){1,}\b",
+    r"\b[A-Z][A-Za-z0-9]+(?:[A-Z][A-Za-z0-9]+)+\b",
+)
+
+GENERAL_TECH_KEYWORDS = (
+    "什么是",
+    "是什么",
+    "概念",
+    "原理",
+    "区别",
+    "优缺点",
+    "最佳实践",
+    "为什么",
+    "如何理解",
+    "explain",
+    "what is",
+    "why",
+    "difference",
+    "best practice",
+)
+
+WEB_HINT_KEYWORDS = (
+    "最新",
+    "官方",
+    "文档",
+    "资料",
+    "网上",
+    "联网",
+    "搜索",
+    "latest",
+    "official",
+    "docs",
+    "documentation",
 )
 
 
-def classify_query_intent(query: str | None) -> QueryIntent:
+def _append_signal(signals: list[str], signal: str):
+    if signal not in signals:
+        signals.append(signal)
+
+
+def _clamp_confidence(score: float) -> float:
+    return max(0.0, min(score, 0.99))
+
+
+def classify_query_intent_detail(query: str | None) -> IntentResult:
     text = (query or "").strip()
     if not text:
-        return QueryIntent.CHITCHAT
+        return IntentResult(
+            intent=QueryIntent.CHITCHAT,
+            confidence=0.95,
+            signals=["empty_input"],
+        )
 
     lowered = text.lower()
     for pattern in CHITCHAT_PATTERNS:
         if re.match(pattern, lowered, flags=re.IGNORECASE):
-            return QueryIntent.CHITCHAT
+            return IntentResult(
+                intent=QueryIntent.CHITCHAT,
+                confidence=0.98,
+                signals=[f"chitchat_pattern:{pattern}"],
+            )
+
+    signals: list[str] = []
+    code_score = 0.0
+    memory_score = 0.0
+    general_score = 0.0
 
     for pattern in MEMORY_PATTERNS:
         if re.search(pattern, text, flags=re.IGNORECASE):
-            return QueryIntent.MEMORY
+            memory_score += 0.85
+            _append_signal(signals, f"memory_pattern:{pattern}")
 
-    if any(keyword in text for keyword in CODEBASE_KEYWORDS):
-        return QueryIntent.CODEBASE
+    for keyword in CODEBASE_KEYWORDS:
+        if keyword in text or keyword in lowered:
+            code_score += 0.18
+            _append_signal(signals, f"code_keyword:{keyword}")
 
     for pattern in CODEBASE_PATTERNS:
         if re.search(pattern, text):
-            return QueryIntent.CODEBASE
+            code_score += 0.35
+            _append_signal(signals, f"code_pattern:{pattern}")
 
-    return QueryIntent.GENERAL
+    for keyword in GENERAL_TECH_KEYWORDS:
+        if keyword in text or keyword in lowered:
+            general_score += 0.22
+            _append_signal(signals, f"general_keyword:{keyword}")
+
+    needs_web = any(keyword in text or keyword in lowered for keyword in WEB_HINT_KEYWORDS)
+    if needs_web:
+        _append_signal(signals, "web_hint")
+
+    # Phrases that point a general concept back to the selected repository.
+    repository_anchors = ("这个项目", "本项目", "当前项目", "这个仓库", "本仓库", "代码里", "项目中", "仓库中")
+    if any(anchor in text for anchor in repository_anchors):
+        code_score += 0.4
+        _append_signal(signals, "repository_anchor")
+
+    # Memory questions can also contain repository words. Keep explicit memory asks routed to memory.
+    if memory_score >= 0.8 and code_score < 0.7:
+        return IntentResult(
+            intent=QueryIntent.MEMORY,
+            confidence=_clamp_confidence(memory_score),
+            signals=signals,
+            needs_memory=True,
+        )
+
+    secondary: list[QueryIntent] = []
+    if code_score >= 0.35:
+        if general_score >= 0.22:
+            secondary.append(QueryIntent.GENERAL)
+        if memory_score >= 0.5:
+            secondary.append(QueryIntent.MEMORY)
+        return IntentResult(
+            intent=QueryIntent.CODEBASE,
+            confidence=_clamp_confidence(0.55 + code_score * 0.35),
+            signals=signals,
+            secondary=secondary,
+            needs_repository=True,
+            needs_memory=QueryIntent.MEMORY in secondary,
+            needs_web=needs_web,
+        )
+
+    if memory_score >= 0.5:
+        return IntentResult(
+            intent=QueryIntent.MEMORY,
+            confidence=_clamp_confidence(memory_score),
+            signals=signals,
+            needs_memory=True,
+            needs_web=needs_web,
+        )
+
+    return IntentResult(
+        intent=QueryIntent.GENERAL,
+        confidence=_clamp_confidence(0.55 + general_score * 0.3),
+        signals=signals or ["default_general"],
+        needs_web=needs_web,
+    )
+
+
+def classify_query_intent(query: str | None) -> QueryIntent:
+    return classify_query_intent_detail(query).intent
 
 
 def chitchat_answer(query: str | None) -> str:
