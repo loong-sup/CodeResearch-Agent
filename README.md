@@ -18,7 +18,7 @@ CodeResearch Agent 是一个面向代码库和项目文档的智能问答与深�
 | --- | --- |
 | 前端 | React 18, TypeScript, Vite, Ant Design, Axios, Valtio |
 | 后端 | FastAPI, Uvicorn, SQLAlchemy |
-| 检索与存储 | Elasticsearch, PostgreSQL, ChromaDB |
+| 检索与存储 | Elasticsearch, PostgreSQL |
 | 大模型 | 阿里云百炼 DashScope |
 | 搜索 | Serper API |
 | 部署 | Docker Compose |
