@@ -75,6 +75,7 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 .codex/
+openspec/
 *.swp
 *.swo
 *.suo
