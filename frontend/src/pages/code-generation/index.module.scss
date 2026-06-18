@@ -1,0 +1,39 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  gap: 18px;
+  padding: 16px;
+  max-width: 1200px;
+  margin: 0 auto;
+  box-sizing: border-box;
+
+  > div {
+    width: 100%;
+  }
+}
+
+.header {
+  max-width: 780px;
+}
+
+.title {
+  margin: 0 0 8px;
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.subtitle {
+  margin: 0;
+  color: #607086;
+  font-size: 15px;
+  line-height: 24px;
+}
+
+.sender {
+  max-width: 780px;
+}

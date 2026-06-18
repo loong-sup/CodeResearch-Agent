@@ -1,7 +1,7 @@
 import { AxiosRequestConfig } from 'axios'
 import { request } from './request'
 
-export function list(params?: {}, options?: AxiosRequestConfig) {
+export function list(params?: object, options?: AxiosRequestConfig) {
   return request.get<{
     sessions: API.Session[]
   }>(`/get_sessions/`, {
@@ -33,7 +33,7 @@ export function detail(
   })
 }
 
-export function create(params?: {}, options?: AxiosRequestConfig) {
+export function create(params?: object, options?: AxiosRequestConfig) {
   return request.post<
     API.Result<{
       session_id: string
@@ -75,6 +75,37 @@ export function chat(
   }
   return request.post<ReadableStream>(
     '/ai_search/',
+    {
+      ..._params,
+    },
+    {
+      headers: {
+        Accept: 'text/event-stream',
+      },
+      responseType: 'stream',
+      adapter: 'fetch',
+      loading: false,
+      params: {
+        session_id: id,
+      },
+      ...options,
+    },
+  )
+}
+
+export function codeGeneration(
+  params: {
+    id: string
+    message: string
+    language: API.CodeGenerationLanguage
+    repository_id?: string
+    repository_ids?: string[]
+  },
+  options?: AxiosRequestConfig,
+) {
+  const { id, ..._params } = params
+  return request.post<ReadableStream>(
+    '/code_generation/',
     {
       ..._params,
     },

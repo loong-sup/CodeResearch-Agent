@@ -33,7 +33,7 @@ const Section = (props: {
   )
 }
 
-const 答案 = (props: { item: API.ChatItem }) => {
+const AnswerSection = (props: { item: API.ChatItem }) => {
   const { item } = props
 
   /* markdown */
@@ -66,10 +66,10 @@ const 答案 = (props: { item: API.ChatItem }) => {
         name: 'codeCitation',
         level: 'inline',
         start(src) {
-          return src.match(/\[[^\[\]]+:\d+-\d+\]/)?.index
+          return src.match(/\[[^[\]]+:\d+-\d+\]/)?.index
         },
         tokenizer(src) {
-          const match = /^\[([^\[\]]+:\d+-\d+)\]/.exec(src)
+          const match = /^\[([^[]]+:\d+-\d+)\]/.exec(src)
           if (match) {
             const [raw, citation] = match
             return {
@@ -118,6 +118,12 @@ const 答案 = (props: { item: API.ChatItem }) => {
 
   return (
     <Section title="答案" icon={IconAnswer}>
+      {item.generation_language ? (
+        <div className={styles['chat-message-result__meta']}>
+          代码生成 · {item.generation_language}
+        </div>
+      ) : null}
+
       {item.think ? (
         <Markdown
           className={classNames(
@@ -253,37 +259,6 @@ const 网络来源 = (props: { item: API.ChatItem }) => {
   )
 }
 
-const 笔记 = (props: { item: API.ChatItem }) => {
-  const { item } = props
-  console.log(item)
-
-  // 后端暂未实现，使用假数据代替
-  return (
-    <Section title="笔记" icon={IconImage}>
-      <div className={styles['chat-message-result__xhs']}>
-        {Array.from({ length: 4 }).map((_) => (
-          <div className={styles.item}>
-            <div className={styles.header}>
-              <img className={styles.cover} src={IconShare} />
-            </div>
-
-            <div className={styles.footer}>
-              <div className={styles.title}>
-                如何培养孩子的兴趣？家长学会这三点，孩子受益匪浅 - Classover
-              </div>
-
-              <div className={styles.user}>
-                <img className={styles.avatar} src={IconShare} />
-                <div className={styles.name}>Classover</div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </Section>
-  )
-}
-
 const 图像 = (props: { item: API.ChatItem }) => {
   const { item } = props
 
@@ -391,7 +366,7 @@ export function Result(props: {
 
   return (
     <div className={styles['chat-message-result']}>
-      {item.think || item.content || item.error ? <答案 item={item} /> : null}
+      {item.think || item.content || item.error ? <AnswerSection item={item} /> : null}
 
       {item.loading ? null : (
         <div className={styles['chat-message-result__actions']}>
@@ -424,8 +399,6 @@ export function Result(props: {
       {item.citations?.length ? <来源 item={item} /> : null}
 
       {item.web_search?.length ? <网络来源 item={item} /> : null}
-
-      {false ? <笔记 item={item} /> : null}
 
       {item.image_results?.images?.length ? <图像 item={item} /> : null}
 

@@ -2,6 +2,9 @@ import { PageTransportKey } from '@/utils'
 
 export type ChatEnterData = {
   message: string
+  mode?: 'chat' | 'code-generation'
+  language?: API.CodeGenerationLanguage
+  repository_id?: string
 }
 
 export const transportToChatEnter = Symbol() as PageTransportKey<{

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Body, Depends, UploadFile, File, HTTPException, Query, status
 import uuid
-from schemas.chat import ChatRequest
+from schemas.chat import ChatRequest, CodeGenerationRequest
 from fastapi.responses import StreamingResponse
 import os
 import shutil
@@ -28,6 +28,7 @@ from service.repository_overview import build_repository_overview_evidence, is_r
 from utils.database import get_db
 from utils.prompt import CodebaseAnswerPrompt, GeneralAnswerPrompt
 from utils.query_intent import QueryIntent, chitchat_answer, classify_query_intent_detail
+from service.code_generation import prepare_code_generation, stream_code_generation
 import json
 
 # 加载 .env 文件
@@ -519,4 +520,46 @@ async def deep_research(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
+        )
+
+
+@router.post("/code_generation/")
+async def code_generation(
+    session_id: str = Query(...),
+    request: CodeGenerationRequest = Body(..., description="Code generation request"),
+    db: Session = Depends(get_db),
+):
+    try:
+        user_id = "1"
+        explicit_repository_ids = request.repository_ids or (
+            [request.repository_id] if request.repository_id else None
+        )
+        generation_context = prepare_code_generation(
+            user_id=user_id,
+            session_id=session_id,
+            question=request.message,
+            language=request.language,
+            explicit_repository_ids=explicit_repository_ids,
+            db=db,
+        )
+        return StreamingResponse(
+            stream_code_generation(
+                session_id=session_id,
+                question=request.message,
+                language_label=generation_context["language_label"],
+                fence_label=generation_context["fence_label"],
+                final_prompt=generation_context["final_prompt"],
+                references=generation_context["references"],
+                repository_context=generation_context["repositories"],
+                user_id=user_id,
+            ),
+            media_type="text/event-stream",
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.exception(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
         )

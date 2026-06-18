@@ -1,6 +1,7 @@
 import { BaseLayout } from '@/layout/base'
 import NotFound from '@/pages/404'
 import Chat from '@/pages/chat'
+import CodeGeneration from '@/pages/code-generation'
 import Index from '@/pages/index'
 import Repository from '@/pages/repository'
 import {
@@ -30,6 +31,10 @@ export const routes: IRouteObject[] = [
   {
     path: '/repository',
     Component: Repository,
+  },
+  {
+    path: '/code-generation',
+    Component: CodeGeneration,
   },
 ]
 

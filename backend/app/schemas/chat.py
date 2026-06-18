@@ -56,3 +56,11 @@ class ChatRequest(BaseModel):
     repository_ids: Optional[List[str]] = None
     web_search: bool = False
     include_media: bool = False
+
+
+class CodeGenerationRequest(BaseModel):
+    message: str
+    language: str
+    repository_id: Optional[str] = None
+    repository_ids: Optional[List[str]] = None
+    include_references: bool = True

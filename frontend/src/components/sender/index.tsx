@@ -4,6 +4,7 @@ import IconSend from '@/components/icons/IconSend'
 import { sessionActions, sessionState } from '@/store/session'
 import {
   AimOutlined,
+  CodeOutlined,
   DatabaseOutlined,
   GlobalOutlined,
   LoadingOutlined,
@@ -13,7 +14,14 @@ import { Button, Input, Select, Space, Upload, UploadFile } from 'antd'
 import classNames from 'classnames'
 import { PropsWithChildren, useMemo, useState } from 'react'
 import { useSnapshot } from 'valtio'
+import { CODE_GENERATION_LANGUAGE_OPTIONS } from './code-generation-options'
 import './index.scss'
+
+type SenderUploadFile = UploadFile & {
+  loading?: boolean
+  preview?: string
+  url?: string
+}
 
 const IconFile2 = (
   <svg
@@ -41,6 +49,7 @@ export default function ComSender(
   props: PropsWithChildren<{
     className?: string
     loading?: boolean
+    placeholder?: string
     onSend?: (value: string, files: string[]) => void | Promise<void>
     onContract?: () => void
     repositoryOptions?: {
@@ -59,8 +68,8 @@ export default function ComSender(
   const {
     className,
     onSend,
-    onContract,
     loading,
+    placeholder,
     repositoryOptions,
     selectedRepositoryId,
     repositoryLoading,
@@ -71,11 +80,7 @@ export default function ComSender(
     ...rest
   } = props
   const [value, setValue] = useState('')
-  const [fileList, setFileList] = useState<
-    (UploadFile & {
-      loading?: boolean
-    })[]
-  >([])
+  const [fileList, setFileList] = useState<SenderUploadFile[]>([])
 
   const uploading = useMemo(() => {
     return fileList.some((file) => file.loading)
@@ -105,11 +110,7 @@ export default function ComSender(
     setFileList([])
   }
 
-  async function upload(
-    file: UploadFile & {
-      loading?: boolean
-    },
-  ) {
+  async function upload(file: SenderUploadFile) {
     if (fileList.length >= 10) {
       window.$app.message.error('最多只能上传 10 个附件')
       return
@@ -118,17 +119,17 @@ export default function ComSender(
     file.loading = true
 
     if (file.type?.startsWith('image/')) {
-      file.preview = URL.createObjectURL(file as any)
+      file.preview = URL.createObjectURL(file as unknown as Blob)
     }
 
     setFileList((prev) => [...prev, file])
 
     try {
-      const { data } = await api.session.upload({ files: file as any })
+      const { data } = await api.session.upload({ files: file as unknown as File })
       file.url = data.url
 
       window.$app.message.success(`${file.name} 上传成功`)
-    } catch (error) {
+    } catch {
       window.$app.message.error(`${file.name} 上传失败`)
     } finally {
       file.loading = false
@@ -207,7 +208,10 @@ export default function ComSender(
         <Input.TextArea
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          placeholder="例如：这个接口在哪里实现？AuthService 在哪里被调用？这个配置项是从哪里生效的？按 Enter 发送，Shift + Enter 换行"
+          placeholder={
+            placeholder ||
+            '例如：这个接口在哪里实现？AuthService 在哪里被调用？这个配置项是从哪里生效的？按 Enter 发送，Shift + Enter 换行'
+          }
           autoSize={{ minRows: 2 }}
           autoFocus
           onPressEnter={(e) => {
@@ -245,10 +249,37 @@ export default function ComSender(
               color={session.useDeep ? 'primary' : 'default'}
               variant={session.useDeep ? 'filled' : 'outlined'}
               icon={<ReadOutlined />}
-              onClick={() => sessionActions.setUseDeep(!session.useDeep)}
+              onClick={() => {
+                sessionActions.setUseDeep(!session.useDeep)
+                if (!session.useDeep) {
+                  sessionActions.setUseCodeGeneration(false)
+                }
+              }}
             >
               深度探索
             </Button>
+
+            <Button
+              color={session.useCodeGeneration ? 'primary' : 'default'}
+              variant={session.useCodeGeneration ? 'filled' : 'outlined'}
+              icon={<CodeOutlined />}
+              onClick={() =>
+                sessionActions.setUseCodeGeneration(!session.useCodeGeneration)
+              }
+            >
+              代码生成
+            </Button>
+
+            {session.useCodeGeneration ? (
+              <Select
+                className="com-sender__language-select"
+                value={session.codeGenerationLanguage}
+                options={CODE_GENERATION_LANGUAGE_OPTIONS}
+                onChange={(language) =>
+                  sessionActions.setCodeGenerationLanguage(language)
+                }
+              />
+            ) : null}
 
             <Button
               color={session.useWeb ? 'primary' : 'default'}

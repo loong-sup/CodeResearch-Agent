@@ -1,39 +1,31 @@
-import IconNewChat from '@/assets/layout/newchat.svg'
-import StoreImage from '@/assets/layout/store.svg'
 import { Avatar } from 'antd'
-import { useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import classNames from 'classnames'
+import { Link, useLocation } from 'react-router-dom'
+import { NAV_ITEMS, getActiveNavKey } from './nav-config'
 import './nav.scss'
 
 export function Nav() {
-  const list = useMemo(
-    () => [
-      {
-        key: '1',
-        label: '新对话',
-        icon: IconNewChat,
-        href: '/',
-      },
-      {
-        key: '2',
-        label: '文档',
-        icon: StoreImage,
-        href: '/repository',
-      },
-    ],
-    [],
-  )
+  const location = useLocation()
+  const activeKey = getActiveNavKey(location.pathname)
 
   return (
     <div className="base-layout-nav">
-      {list.map((item) => (
+      {NAV_ITEMS.map((item) => (
         <Link
-          className="base-layout-nav__item"
+          className={classNames('base-layout-nav__item', {
+            'base-layout-nav__item--active': item.key === activeKey,
+          })}
           key={item.key}
           title={item.label}
           to={item.href ?? '#'}
         >
-          <img src={item.icon} alt={item.label} />
+          {typeof item.icon === 'string' ? (
+            <img src={item.icon} alt={item.label} />
+          ) : (
+            <span className="base-layout-nav__icon" aria-hidden="true">
+              {item.icon}
+            </span>
+          )}
         </Link>
       ))}
 

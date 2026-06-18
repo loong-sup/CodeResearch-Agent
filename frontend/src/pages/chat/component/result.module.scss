@@ -1,4 +1,11 @@
 .chat-message-result {
+  .chat-message-result__meta {
+    color: #6f798b;
+    font-size: 12px;
+    line-height: 20px;
+    margin-bottom: 8px;
+  }
+
   margin-bottom: 30px;
   .chat-message-result__think {
     color: #8b8b8b;

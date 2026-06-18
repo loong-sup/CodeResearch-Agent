@@ -56,6 +56,16 @@
     justify-content: space-between;
     padding: 14px 16px;
     padding-top: 0;
+    gap: 12px;
+    flex-wrap: wrap;
+
+    .com-sender__actions-left {
+      flex-wrap: wrap;
+    }
+
+    .com-sender__language-select {
+      min-width: 128px;
+    }
 
     .ant-btn {
       --ant-button-padding-inline: 8px;

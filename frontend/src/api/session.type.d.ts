@@ -38,6 +38,8 @@ declare namespace API {
     web_search?: WebSearchResult[]
     web_search_status?: WebSearchStatus
     recommended_questions?: string[]
+    generation_language?: CodeGenerationLanguage
+    generation_fence?: string
     image_results?: {
       images?: {
         title: string
@@ -105,4 +107,6 @@ declare namespace API {
     result_count?: number
     error?: string
   }
+
+  type CodeGenerationLanguage = 'C' | 'C++' | 'Python' | 'TypeScript' | 'Java'
 }

@@ -3,7 +3,7 @@ import ComPageLayout from '@/components/page-layout'
 import ComSender from '@/components/sender'
 import { ChatRole, ChatType } from '@/configs'
 import { deviceActions } from '@/store/device'
-import { sessionState } from '@/store/session'
+import { sessionActions, sessionState } from '@/store/session'
 import { usePageTransport } from '@/utils'
 import { useMount, useRequest, useUnmount } from 'ahooks'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -11,6 +11,7 @@ import { useParams } from 'react-router-dom'
 import { proxy, useSnapshot } from 'valtio'
 import ChatMessage from './component/chat-message'
 import styles from './index.module.scss'
+import { resolveChatRequestRouting } from './request-routing'
 import { createChatId, transportToChatEnter } from './shared'
 
 function buildCitationsFromDocuments(documents: API.Document[] = []): API.Citation[] {
@@ -57,6 +58,7 @@ export default function Index() {
   const [activeRepositoryContext, setActiveRepositoryContext] = useState<
     API.RepositoryContext[]
   >([])
+  const initialRepositoryIdRef = useRef<string | undefined>(ctx?.data.repository_id)
 
   // 使用valtio管理聊天消息列表状态
   const [chat] = useState(() => {
@@ -217,6 +219,16 @@ export default function Index() {
   useEffect(() => {
     if (!repositoryOptions.length) return
     if (
+      initialRepositoryIdRef.current &&
+      repositoryOptions.some((item) => item.value === initialRepositoryIdRef.current)
+    ) {
+      const initialRepositoryId = initialRepositoryIdRef.current
+      initialRepositoryIdRef.current = undefined
+      setSelectedRepositoryId(initialRepositoryId)
+      updateActiveRepositoryContext(initialRepositoryId)
+      return
+    }
+    if (
       selectedRepositoryId &&
       repositoryOptions.some((item) => item.value === selectedRepositoryId)
     ) {
@@ -258,14 +270,28 @@ export default function Index() {
       target.loading = true
       try {
         const repositoryId = await resolveRepositoryForMessage(message)
-        const res = await api.session.chat({
-          id: id!,
-          message,
-          web_search: sessionStore.useWeb,
-          deep_research: sessionStore.useDeep,
-          attachments: attachments,
-          repository_id: repositoryId,
+        const routing = resolveChatRequestRouting({
+          useCodeGeneration: sessionState.useCodeGeneration,
+          codeGenerationLanguage: sessionState.codeGenerationLanguage,
+          useWeb: sessionState.useWeb,
+          useDeep: sessionState.useDeep,
+          repositoryId,
         })
+        const res = routing.endpoint === 'code_generation'
+          ? await api.session.codeGeneration({
+              id: id!,
+              message,
+              language: routing.payload.language,
+              repository_id: routing.payload.repository_id,
+            })
+          : await api.session.chat({
+              id: id!,
+              message,
+              web_search: routing.payload.web_search,
+              deep_research: routing.payload.deep_research,
+              attachments: attachments,
+              repository_id: routing.payload.repository_id,
+            })
 
         // 获取流式响应的reader
         const reader = res.data?.getReader()
@@ -367,6 +393,14 @@ export default function Index() {
             target.web_search_status = json.web_search_status
           }
 
+          if (json?.generation_language) {
+            target.generation_language = json.generation_language
+          }
+
+          if (json?.generation_fence) {
+            target.generation_fence = json.generation_fence
+          }
+
           if (json?.repository_context?.length) {
             target.repository_context = json.repository_context
             setActiveRepositoryContext(json.repository_context)
@@ -428,7 +462,16 @@ export default function Index() {
         return undefined
       }
     },
-    [chat, id, repositoryOptions, selectedRepositoryId, sessionStore.useDeep, sessionStore.useWeb],
+    [
+      chat,
+      id,
+      repositoryOptions,
+      selectedRepositoryId,
+      sessionStore.codeGenerationLanguage,
+      sessionStore.useCodeGeneration,
+      sessionStore.useDeep,
+      sessionStore.useWeb,
+    ],
   )
 
   // 发送消息的主函数，处理用户输入并创建对话项
@@ -482,6 +525,12 @@ export default function Index() {
   )
   // 组件挂载时，处理页面间传递的消息或加载历史记录
   useMount(async () => {
+    if (ctx?.data.mode === 'code-generation') {
+      sessionActions.setUseCodeGeneration(true)
+      sessionActions.setCodeGenerationLanguage(ctx.data.language || 'Python')
+    } else if (ctx?.data.mode === 'chat') {
+      sessionActions.setUseCodeGeneration(false)
+    }
     await repositories.runAsync()
     if (ctx?.data.message) {
       send(ctx.data.message)
